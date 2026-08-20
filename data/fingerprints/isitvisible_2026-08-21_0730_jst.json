@@ -1,0 +1,30 @@
+{
+  "source": "Is It Visible screenshot fingerprint",
+  "observed_at": "2026-08-21T07:30:00+09:00",
+  "observations": [
+    {
+      "valid_time": "2026-08-26T09:00:00+09:00",
+      "temperature_c": 27.2,
+      "displayed_cloud_pct": 5,
+      "visibility_km": 42.5,
+      "rank": 1,
+      "label": "EXCELLENT"
+    },
+    {
+      "valid_time": "2026-08-26T08:00:00+09:00",
+      "temperature_c": 25.6,
+      "displayed_cloud_pct": 11,
+      "visibility_km": 37.0,
+      "rank": 2,
+      "label": "GOOD"
+    },
+    {
+      "valid_time": "2026-08-25T10:00:00+09:00",
+      "temperature_c": 27.8,
+      "displayed_cloud_pct": 21,
+      "visibility_km": 23.5,
+      "rank": 3,
+      "label": "GOOD"
+    }
+  ]
+}

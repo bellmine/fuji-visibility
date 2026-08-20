@@ -1,0 +1,45 @@
+{
+  "latitude": 35.52,
+  "longitude": 138.75,
+  "elevation": 830.0,
+  "generationtime_ms": 0.12,
+  "utc_offset_seconds": 32400,
+  "timezone": "Asia/Tokyo",
+  "timezone_abbreviation": "JST",
+  "model": "jma_seamless",
+  "hourly_units": {
+    "time": "iso8601",
+    "temperature_2m": "°C",
+    "relative_humidity_2m": "%",
+    "precipitation_probability": "%",
+    "cloud_cover": "%",
+    "cloud_cover_low": "%",
+    "cloud_cover_mid": "%",
+    "cloud_cover_high": "%",
+    "visibility": "m",
+    "wind_speed_10m": "km/h",
+    "wind_direction_10m": "°"
+  },
+  "hourly": {
+    "time": [
+      "2026-08-25T05:00",
+      "2026-08-25T06:00",
+      "2026-08-25T07:00",
+      "2026-08-25T08:00",
+      "2026-08-25T09:00",
+      "2026-08-25T10:00",
+      "2026-08-25T11:00",
+      "2026-08-25T12:00"
+    ],
+    "temperature_2m": [22.0, 23.0, 24.0, 25.0, 26.0, 27.8, 28.0, 28.2],
+    "relative_humidity_2m": [82, 80, 78, 76, 74, 70, 68, 66],
+    "precipitation_probability": [20, 15, 10, 5, 5, 5, 10, 10],
+    "cloud_cover": [35, 30, 25, 20, 15, 21, 18, 15],
+    "cloud_cover_low": [25, 20, 15, 10, 8, 10, 8, 6],
+    "cloud_cover_mid": [18, 15, 12, 9, 7, 5, 6, 8],
+    "cloud_cover_high": [30, 28, 25, 20, 18, 16, 14, 12],
+    "visibility": [18000, 22000, 28000, 34000, 37000, 42500, 40000, 38000],
+    "wind_speed_10m": [5, 5, 6, 7, 7, 8, 8, 9],
+    "wind_direction_10m": [180, 185, 190, 195, 200, 205, 210, 215]
+  }
+}

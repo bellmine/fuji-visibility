@@ -1,0 +1,10 @@
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+.ruff_cache/
+data/raw/*.json
+!data/raw/.gitkeep
