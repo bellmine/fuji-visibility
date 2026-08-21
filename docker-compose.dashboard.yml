@@ -5,6 +5,7 @@ services:
       dockerfile: Dockerfile
     container_name: fuji-dashboard
     restart: unless-stopped
+    user: "${FUJI_CONTAINER_UID:-1001}:${FUJI_CONTAINER_GID:-1001}"
     command: ["uvicorn", "fuji_visibility.web.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
     env_file:
       - .env
@@ -31,6 +32,7 @@ services:
       dockerfile: Dockerfile
     container_name: fuji-snapshot-worker
     restart: unless-stopped
+    user: "${FUJI_CONTAINER_UID:-1001}:${FUJI_CONTAINER_GID:-1001}"
     command: ["python", "-m", "fuji_visibility.snapshot_worker"]
     env_file:
       - .env

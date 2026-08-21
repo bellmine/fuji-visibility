@@ -24,8 +24,7 @@ docker network inspect npm_default >/dev/null
 cp .env.example .env
 chmod 600 .env
 mkdir -p data
-# The image runs as UID/GID 10001; bind-mounted SQLite/raw data must be writable.
-sudo chown -R 10001:10001 data
+# Set FUJI_CONTAINER_UID/GID in .env to the owner of data/ (id -u / id -g).
 docker compose -f docker-compose.dashboard.yml config
 docker compose -f docker-compose.dashboard.yml up -d --build
 docker compose -f docker-compose.dashboard.yml ps
@@ -106,6 +105,7 @@ forced to `/app/data` so the dashboard and worker always share one database and
 one lock file.
 
 If the host uses a different non-root ownership policy, keep the directory
-writable by the container's non-root UID 10001 (or deliberately adapt the
-image/compose UID to the host account). Do not solve this by publishing port
-8000 or by storing the database inside the ephemeral container filesystem.
+writable by the configured non-root `FUJI_CONTAINER_UID/GID` (the Compose
+defaults are 1001:1001 and are intended to be adjusted per host). Do not solve
+this by publishing port 8000 or by storing the database inside the ephemeral
+container filesystem.
