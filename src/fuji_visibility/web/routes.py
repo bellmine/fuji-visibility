@@ -17,6 +17,13 @@ from ..storage import StorageError, ForecastStore
 from ..time_utils import JST, parse_clock, parse_date
 from .refresh import RefreshBusyError
 from .schemas import RefreshResponse
+from .i18n import (
+    DECISION_LABELS,
+    FRESHNESS_LABELS,
+    LOCATION_LABELS,
+    REFRESH_STATUS_LABELS,
+    label,
+)
 from .viewmodels import dashboard_payload, trend_payload
 
 logger = logging.getLogger(__name__)
@@ -77,6 +84,7 @@ def register_routes(app: FastAPI, templates: Jinja2Templates) -> None:
                 "location": selected_location,
                 "filter_hours": hour_range,
                 "filter_arrival_after": selected_arrival,
+                "location_label": LOCATION_LABELS.get(selected_location.name, selected_location.name),
                 "version": payload["status"].get("version"),
                 "error": None,
             }
@@ -84,14 +92,38 @@ def register_routes(app: FastAPI, templates: Jinja2Templates) -> None:
             logger.exception("dashboard render failed")
             context = {
                 "request": request,
-                "payload": {"status": {"version": "unknown"}, "days": [], "decision": {}},
+                "payload": {
+                    "status": {
+                        "version": "unknown",
+                        "freshness": "UNKNOWN",
+                        "freshness_label": label(FRESHNESS_LABELS, "UNKNOWN"),
+                        "last_refresh_status": "unknown",
+                        "last_refresh_status_label": label(REFRESH_STATUS_LABELS, "unknown"),
+                        "full_models": 0,
+                        "configured_models": 0,
+                        "coverage_label": "0 个模型中 0 个数据完整",
+                        "last_successful_snapshot": None,
+                    },
+                    "days": [],
+                    "decision": {
+                        "status": "NO QUALIFYING WINDOW",
+                        "status_label": label(DECISION_LABELS, "NO QUALIFYING WINDOW"),
+                        "winner_date": None,
+                        "days": [],
+                        "rationale": [],
+                    },
+                    "client": {"status": {"location": dashboard_service.location.name}, "days": []},
+                },
                 "selected_day": None,
                 "settings": dashboard_service.settings,
                 "location": dashboard_service.location,
                 "filter_hours": dashboard_service.settings.hours,
                 "filter_arrival_after": dashboard_service.settings.default_arrival_after,
+                "location_label": LOCATION_LABELS.get(
+                    dashboard_service.location.name, dashboard_service.location.name
+                ),
                 "version": "unknown",
-                "error": "Forecast data could not be loaded. Stored data may still be available.",
+                "error": "预报数据暂时无法加载，已保存的数据可能仍然可用。",
             }
         return templates.TemplateResponse(request, "dashboard.html", context)
 
@@ -100,11 +132,23 @@ def register_routes(app: FastAPI, templates: Jinja2Templates) -> None:
         dashboard_service = service(request)
         try:
             payload: dict[str, Any] = dashboard_service.diagnostics()
+            payload["location_label"] = LOCATION_LABELS.get(
+                str(payload.get("location")), str(payload.get("location"))
+            )
+            status = payload.get("status", {})
+            if isinstance(status, dict):
+                payload["status"] = {
+                    **status,
+                    "freshness_label": label(FRESHNESS_LABELS, str(status.get("freshness"))),
+                    "last_refresh_status_label": label(
+                        REFRESH_STATUS_LABELS, str(status.get("last_refresh_status"))
+                    ),
+                }
             error = None
         except (StorageError, ValueError) as exc:
             logger.exception("diagnostics render failed")
             payload = {}
-            error = "Diagnostics are temporarily unavailable."
+            error = "诊断信息暂时无法获取。"
         return templates.TemplateResponse(
             request,
             "diagnostics.html",
@@ -121,7 +165,7 @@ def register_routes(app: FastAPI, templates: Jinja2Templates) -> None:
         try:
             return service(request).status()
         except (StorageError, ValueError) as exc:
-            raise HTTPException(status_code=503, detail="Dashboard status unavailable") from exc
+            raise HTTPException(status_code=503, detail="仪表盘状态暂时无法获取。") from exc
 
     @app.get("/api/days")
     async def api_days(
@@ -212,7 +256,7 @@ def register_routes(app: FastAPI, templates: Jinja2Templates) -> None:
             )
             return trend_payload(metrics, variable=variable)
         except (ValueError, StorageError) as exc:
-            raise HTTPException(status_code=400, detail="Invalid trend request") from exc
+            raise HTTPException(status_code=400, detail="趋势请求无效。") from exc
 
     @app.post("/api/refresh", response_model=RefreshResponse)
     async def api_refresh(request: Request) -> RefreshResponse:
@@ -223,9 +267,9 @@ def register_routes(app: FastAPI, templates: Jinja2Templates) -> None:
             return RefreshResponse(
                 status=status,
                 message=(
-                    "Forecast refreshed with partial model data."
+                    "预报已刷新，但部分模型只返回了部分数据。"
                     if failures
-                    else "Forecast refreshed successfully."
+                    else "预报刷新成功。"
                 ),
                 snapshot_ids=list(result.snapshot_ids),
                 successful_models=list(result.successful_models),
@@ -233,13 +277,13 @@ def register_routes(app: FastAPI, templates: Jinja2Templates) -> None:
             )
         except RefreshBusyError as exc:
             return JSONResponse(
-                {"status": "busy", "message": str(exc)}, status_code=409
+                {"status": "busy", "message": "预报正在刷新，请稍后再试。"}, status_code=409
             )
         except RefreshCooldownError as exc:
             return JSONResponse(
                 {
                     "status": "cooldown",
-                    "message": str(exc),
+                    "message": f"预报最近已刷新，请在 {exc.retry_after_seconds} 秒后再试。",
                     "retry_after_seconds": exc.retry_after_seconds,
                 },
                 status_code=429,
@@ -250,7 +294,7 @@ def register_routes(app: FastAPI, templates: Jinja2Templates) -> None:
             return JSONResponse(
                 {
                     "error": "refresh_failed",
-                    "message": "Forecast refresh failed. Stored data is still available.",
+                    "message": "预报刷新失败，已保存的数据仍然可用。",
                     "detail": str(exc),
                 },
                 status_code=502,
@@ -273,7 +317,7 @@ def _dashboard_data(
             location=location,
         )
     except (ValueError, StorageError) as exc:
-        raise HTTPException(status_code=400, detail="Invalid dashboard request") from exc
+        raise HTTPException(status_code=400, detail="仪表盘请求无效。") from exc
 
 
 def _parse_dates(value: str | None, service: DashboardService) -> tuple[date, ...]:

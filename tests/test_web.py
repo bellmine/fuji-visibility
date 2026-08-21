@@ -119,10 +119,15 @@ def test_homepage_and_json_apis_use_stored_consensus(tmp_path: Path) -> None:
         "/?dates=2026-08-26&date=2026-08-26&hours=8-9&arrival_after=08:00"
     )
     assert page.status_code == 200
-    assert "RECOMMENDED" in page.text
-    assert "Reachable hourly forecast" in page.text
-    assert "Data quality note" in page.text  # fixture is intentionally stale
+    assert '<html lang="zh-CN">' in page.text
+    assert "推荐" in page.text
+    assert "可到达时段逐小时预测" in page.text
+    assert "数据状态" in page.text  # fixture is intentionally stale
+    assert "8月26日 周三" in page.text
     assert "window.__FUJI_DASHBOARD__" in page.text
+    assert '<link rel="stylesheet" href="./static/app.css">' in page.text
+    assert '<script src="./static/app.js" defer></script>' in page.text
+    assert "http://fuji.wangdi.store/static/" not in page.text
 
     decision = _get(
         app,
@@ -130,6 +135,7 @@ def test_homepage_and_json_apis_use_stored_consensus(tmp_path: Path) -> None:
     )
     assert decision.status_code == 200
     assert decision.json()["status"] == "RECOMMENDED"
+    assert decision.json()["status_label"] == "推荐"
     assert decision.json()["winner_date"] == "2026-08-26"
 
     forecast = _get(app, "/api/forecast?date=2026-08-26&dates=2026-08-26&hours=8-9")
@@ -140,6 +146,8 @@ def test_homepage_and_json_apis_use_stored_consensus(tmp_path: Path) -> None:
     trend = _get(app, "/api/trend?date=2026-08-26&hour=09:00&variable=proxy")
     assert trend.status_code == 200
     assert trend.json()["points"]
+    assert trend.json()["trend_label"] == "未知"
+    assert trend.json()["confidence_label"] == "未知"
 
 
 def test_no_clear_winner_and_no_qualifying_window_are_explicit(tmp_path: Path) -> None:
@@ -153,6 +161,7 @@ def test_no_clear_winner_and_no_qualifying_window_are_explicit(tmp_path: Path) -
     )
     assert ambiguous.status_code == 200
     assert ambiguous.json()["status"] == "NO CLEAR WINNER"
+    assert ambiguous.json()["status_label"] == "暂无明确优选"
     assert ambiguous.json()["winner_date"] is None
 
     no_window = _get(
@@ -161,6 +170,7 @@ def test_no_clear_winner_and_no_qualifying_window_are_explicit(tmp_path: Path) -
     )
     assert no_window.status_code == 200
     assert no_window.json()["status"] == "NO QUALIFYING WINDOW"
+    assert no_window.json()["status_label"] == "暂无符合条件的观景窗口"
 
 
 def test_partial_model_diagnostics_and_health_status(tmp_path: Path) -> None:
@@ -170,8 +180,9 @@ def test_partial_model_diagnostics_and_health_status(tmp_path: Path) -> None:
 
     page = _get(app, "/?dates=2026-08-26&date=2026-08-26")
     assert page.status_code == 200
-    assert "PARTIAL" in page.text
-    assert "NO QUALIFYING WINDOW" in page.text
+    assert "部分数据" in page.text
+    assert "暂无符合条件的观景窗口" in page.text
+    assert "目前只有 2 个模型具备完整评分所需数据。" in page.text
 
     health = _get(app, "/health")
     assert health.status_code == 200
@@ -206,6 +217,7 @@ def test_refresh_lock_contention_and_manual_cooldown(tmp_path: Path) -> None:
     response = _post(app, "/api/refresh")
     assert response.status_code == 429
     assert response.json()["status"] == "cooldown"
+    assert "预报最近已刷新" in response.json()["message"]
     assert response.headers["retry-after"]
 
 
@@ -220,4 +232,66 @@ def test_refresh_api_failure_keeps_error_structured(tmp_path: Path, monkeypatch:
     response = _post(app, "/api/refresh")
     assert response.status_code == 502
     assert response.json()["error"] == "refresh_failed"
+    assert response.json()["message"] == "预报刷新失败，已保存的数据仍然可用。"
     assert "traceback" not in response.text.lower()
+
+
+def test_dashboard_normal_view_uses_chinese_labels_only(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _seed(settings, dates=("2026-08-26",))
+    page = _get(app=create_app(settings), path="/?dates=2026-08-26&date=2026-08-26")
+
+    english_ui_labels = (
+        "Mt. Fuji Visibility",
+        "When is Mt. Fuji most likely to be visible?",
+        "Decision",
+        "Upcoming conditions",
+        "Reachable hourly forecast",
+        "Consensus snapshot",
+        "Forecast drift",
+        "Is the view changing?",
+        "Model coverage and failures",
+        "Refresh forecast",
+        "Apply",
+        "Location",
+        "Hours",
+        "Arrival after",
+        "Proxy median",
+        "Cloud mid",
+        "Visibility",
+        "Models",
+        "RECOMMENDED",
+        "NO CLEAR WINNER",
+        "NO QUALIFYING WINDOW",
+        "HIGH",
+        "MEDIUM",
+        "LOW",
+        "INSUFFICIENT_DATA",
+        "IMPROVING",
+        "WORSENING",
+        "STABLE",
+        "VOLATILE",
+        "FULL",
+        "PARTIAL",
+    )
+    assert page.status_code == 200
+    assert all(label not in page.text for label in english_ui_labels)
+
+
+def test_decision_state_labels_are_localized(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _seed(settings)
+    app = create_app(settings)
+
+    ambiguous = _get(
+        app,
+        "/?dates=2026-08-26,2026-08-27&date=2026-08-26&hours=8-9&arrival_after=08:00",
+    )
+    assert "暂无明确优选" in ambiguous.text
+
+    no_window = _get(
+        app,
+        "/?dates=2026-08-28&date=2026-08-28&hours=8-9&arrival_after=08:00",
+    )
+    assert "暂无符合条件的观景窗口" in no_window.text
+    assert "这不是数据缺失，而是当前预报未同时满足评分、模型数量和一致性要求。" in no_window.text

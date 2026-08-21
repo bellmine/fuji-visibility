@@ -10,6 +10,7 @@ from fastapi.templating import Jinja2Templates
 
 from .. import __version__
 from ..services import DashboardService
+from .i18n import localized_datetime
 from .routes import register_routes
 from .settings import DashboardSettings
 
@@ -41,17 +42,12 @@ def _kilometers(value: object, digits: int = 1) -> str:
 def _local_datetime(value: object) -> str:
     if not value:
         return "—"
-    try:
-        from ..time_utils import display_datetime, parse_datetime
-
-        return display_datetime(parse_datetime(value) if isinstance(value, str) else value)
-    except (AttributeError, TypeError, ValueError):
-        return str(value)
+    return localized_datetime(value)  # type: ignore[arg-type]
 
 
 def create_app(settings: DashboardSettings | None = None) -> FastAPI:
     app = FastAPI(
-        title="Mt. Fuji Visibility",
+        title="富士山能见度",
         version=__version__,
         docs_url=None,
         redoc_url=None,

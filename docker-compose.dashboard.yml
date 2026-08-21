@@ -6,7 +6,7 @@ services:
     container_name: fuji-dashboard
     restart: unless-stopped
     user: "${FUJI_CONTAINER_UID:-1001}:${FUJI_CONTAINER_GID:-1001}"
-    command: ["uvicorn", "fuji_visibility.web.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+    command: ["uvicorn", "fuji_visibility.web.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1", "--proxy-headers", "--forwarded-allow-ips", "*"]
     env_file:
       - .env
     environment:

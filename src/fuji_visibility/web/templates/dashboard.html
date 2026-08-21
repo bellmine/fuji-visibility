@@ -1,20 +1,20 @@
 {% extends "base.html" %}
 
-{% block title %}Dashboard · Mt. Fuji Visibility{% endblock %}
+{% block title %}富士山能见度 · 仪表盘{% endblock %}
 
 {% block content %}
 {% set status = payload.status %}
 {% set decision = payload.decision %}
 <div class="page-heading">
   <div>
-    <p class="eyebrow">Fuji Five Lakes · {{ location.name }}</p>
-    <h1>When is Mt. Fuji most likely to be visible?</h1>
-    <p class="lede">A rules-based view of stored multi-model forecasts. It is evidence for planning, not a guarantee.</p>
+    <p class="eyebrow">富士五湖 · {{ location_label }}</p>
+    <h1>什么时候最容易看到富士山？</h1>
+    <p class="lede">基于多模型预报数据进行判断，仅供出行决策参考，不代表一定能看到富士山。</p>
   </div>
   <div class="freshness-block status-{{ status.freshness|lower }}">
     <span class="status-dot" aria-hidden="true"></span>
     <div>
-      <strong>{{ status.freshness }}</strong>
+      <strong>{{ status.freshness_label }}</strong>
       <span class="muted">{{ status.last_successful_snapshot|local_datetime }}</span>
     </div>
   </div>
@@ -24,118 +24,117 @@
   <div class="notice notice-error" role="alert">{{ error }}</div>
 {% endif %}
 
-{% if status.freshness in ["STALE", "WARNING", "UNKNOWN"] or status.last_refresh_status == "partial" %}
+{% if status.freshness in ["STALE", "WARNING", "UNKNOWN"] or status.last_refresh_status == "partial" or (status.snapshot_count > 0 and status.full_models < status.configured_models) %}
   <div class="notice notice-warning">
-    <strong>Data quality note:</strong>
-    {% if status.freshness == "STALE" %}the latest stored snapshot is old.{% elif status.freshness == "WARNING" %}the latest snapshot is aging.{% elif status.freshness == "UNKNOWN" %}no successful snapshot timestamp is available.{% endif %}
-    {% if status.last_refresh_status == "partial" %}Some configured models did not return complete data.{% endif %}
-    The dashboard will keep showing the stored evidence until the next refresh succeeds.
+    <strong>数据状态：</strong>
+    {% if status.freshness == "STALE" %}预报数据已过期，建议刷新后再做出行判断。{% elif status.freshness == "WARNING" %}预报数据正在变旧，建议刷新后再做出行判断。{% elif status.freshness == "UNKNOWN" %}暂无成功快照时间，建议先刷新预报。{% endif %}
+    {% if status.last_refresh_status == "partial" or (status.snapshot_count > 0 and status.full_models < status.configured_models) %}目前只有 {{ status.full_models }} 个模型具备完整评分所需数据。{% endif %}
   </div>
 {% endif %}
 
-<section class="toolbar card" aria-label="Dashboard controls">
+<section class="toolbar card" aria-label="仪表盘筛选">
   <form method="get" action="/" class="filter-form">
     <label>
-      <span>Location</span>
+      <span>地点</span>
       <select name="location">
-        <option value="kawaguchiko"{% if location.name == "kawaguchiko" %} selected{% endif %}>Kawaguchiko</option>
-        <option value="oishi"{% if location.name == "oishi" %} selected{% endif %}>Oishi Park</option>
-        <option value="shojiko"{% if location.name == "shojiko" %} selected{% endif %}>Shojiko</option>
+        <option value="kawaguchiko"{% if location.name == "kawaguchiko" %} selected{% endif %}>河口湖</option>
+        <option value="oishi"{% if location.name == "oishi" %} selected{% endif %}>大石公园</option>
+        <option value="shojiko"{% if location.name == "shojiko" %} selected{% endif %}>精进湖</option>
       </select>
     </label>
     <label>
-      <span>Hours</span>
-      <input name="hours" inputmode="numeric" value="{{ filter_hours[0] }}-{{ filter_hours[1] }}" aria-label="Hour range, for example 5-12">
+      <span>时段</span>
+      <input name="hours" inputmode="numeric" value="{{ filter_hours[0] }}-{{ filter_hours[1] }}" aria-label="时段范围，例如 5-12">
     </label>
     <label>
-      <span>Arrival after</span>
+      <span>最早到达时间</span>
       <input name="arrival_after" type="time" value="{{ filter_arrival_after.strftime('%H:%M') }}">
     </label>
-    <button class="button button-secondary" type="submit">Apply</button>
+    <button class="button button-secondary" type="submit">应用</button>
   </form>
   <button class="button button-primary refresh-button" type="button" data-refresh>
-    <span data-refresh-label>Refresh forecast</span>
+    <span data-refresh-label>刷新预报</span>
   </button>
-  <p class="form-hint" data-refresh-message>Manual refresh is rate-limited to once every {{ settings.manual_refresh_cooldown_seconds // 60 }} minutes. Automatic snapshots run every {{ settings.snapshot_interval_hours }} hours.</p>
+  <p class="form-hint" data-refresh-message>手动刷新每 {{ settings.manual_refresh_cooldown_seconds // 60 }} 分钟最多一次。自动快照每 {{ settings.snapshot_interval_hours }} 小时运行一次。</p>
 </section>
 
 <section class="decision-card card status-{{ decision.status|lower|replace(' ', '-') }}" aria-labelledby="decision-heading">
   <div class="decision-topline">
     <div>
-      <p class="eyebrow">Decision</p>
-      <h2 id="decision-heading">{{ decision.status }}</h2>
+      <p class="eyebrow">当前判断</p>
+      <h2 id="decision-heading">{{ decision.status_label }}</h2>
     </div>
-    <span class="decision-badge">{{ decision.status }}</span>
+    <span class="decision-badge">{{ decision.status_label }}</span>
   </div>
   {% set winner = namespace(window=None) %}
   {% for candidate in decision.days %}
     {% if candidate.date == decision.winner_date %}{% set winner.window = candidate.best_window %}{% endif %}
   {% endfor %}
   {% if decision.winner_date and winner.window %}
-    <p class="decision-summary"><strong>{{ decision.winner_date }}</strong> has the best reachable qualifying window, peaking at <strong>{{ winner.window.peak_proxy_median|number(0) }}</strong> Proxy.</p>
+    <p class="decision-summary"><strong>{{ decision.winner_date_label }}</strong> 当前最容易看到富士山，可到达观景窗口为 <strong>{{ winner.window.start|local_datetime }} – {{ winner.window.end|local_datetime }}</strong>，综合评分峰值为 <strong>{{ winner.window.peak_proxy_median|number(0) }}</strong>。</p>
     <div class="metric-row">
-      <div><span>Reachable window</span><strong>{{ winner.window.start|local_datetime }} – {{ winner.window.end|local_datetime }}</strong></div>
-      <div><span>Consensus</span><strong>{{ winner.window.consensus }}</strong></div>
-      <div><span>Stability</span><strong>{{ winner.window.stability_confidence }}</strong></div>
-      <div><span>Trend</span><strong>{{ winner.window.trend }}</strong></div>
+      <div><span>可到达窗口</span><strong>{{ winner.window.start|local_datetime }} – {{ winner.window.end|local_datetime }}</strong></div>
+      <div><span>模型一致性</span><strong>{{ winner.window.consensus_label }}</strong></div>
+      <div><span>稳定性</span><strong>{{ winner.window.stability_confidence_label }}</strong></div>
+      <div><span>趋势</span><strong>{{ winner.window.trend_label }}</strong></div>
     </div>
   {% elif decision.status == "NO CLEAR WINNER" %}
-    <p class="decision-summary">Several days qualify, but the evidence is too close to call. Keep the plan flexible and recheck after the next model cycle.</p>
+    <p class="decision-summary">多个日期均符合条件，但当前证据差距太小，暂时无法选出明显优选。建议保持计划弹性，并在下一轮模型更新后再次查看。</p>
   {% else %}
-    <p class="decision-summary">No day currently meets the reachable-window, Proxy, model-count, and consensus rules. This is a valid result—not a missing recommendation.</p>
+    <p class="decision-summary">目前没有符合条件的可到达观景窗口。<br>这不是数据缺失，而是当前预报未同时满足评分、模型数量和一致性要求。</p>
   {% endif %}
   <ul class="rationale">
-    {% for item in decision.rationale %}<li>{{ item }}</li>{% endfor %}
+    {% for item in decision.rationale_label %}<li>{{ item }}</li>{% endfor %}
   </ul>
 </section>
 
 <section class="section-block" aria-labelledby="days-heading">
   <div class="section-heading">
-    <div><p class="eyebrow">Next {{ payload.days|length }} days</p><h2 id="days-heading">Upcoming conditions</h2></div>
-    <span class="muted">{{ status.configured_models }} configured models · {{ status.full_models }} full in latest refresh</span>
+    <div><p class="eyebrow">未来 {{ payload.days|length }} 天</p><h2 id="days-heading">未来天气窗口</h2></div>
+    <span class="muted">{{ status.coverage_label }} · 最近一次刷新</span>
   </div>
   <div class="day-grid">
     {% for day in payload.days %}
       {% set window = day.best_window %}
       <a class="day-card{% if day.date == payload.selected_date %} is-selected{% endif %}" href="/?date={{ day.date }}{% if location.name %}&location={{ location.name }}{% endif %}">
-        <div class="day-card-head"><strong>{{ day.label }}</strong>{% if day.date == decision.winner_date %}<span class="mini-badge">winner</span>{% endif %}</div>
+        <div class="day-card-head"><strong>{{ day.label }}</strong>{% if day.date == decision.winner_date %}<span class="mini-badge">推荐</span>{% endif %}</div>
         {% if window %}
-          <div class="day-score"><span>{{ window.peak_proxy_median|number(0) }}</span><small>Proxy peak</small></div>
+          <div class="day-score"><span>{{ window.peak_proxy_median|number(0) }}</span><small>综合评分峰值</small></div>
           <dl class="compact-metrics">
-            <div><dt>Window</dt><dd>{{ window.start|local_datetime }}–{{ window.end|local_datetime }}</dd></div>
-            <div><dt>Consensus</dt><dd>{{ window.consensus }}</dd></div>
-            <div><dt>Trend</dt><dd>{{ window.trend }}</dd></div>
+            <div><dt>窗口</dt><dd>{{ window.start|local_datetime }}–{{ window.end|local_datetime }}</dd></div>
+            <div><dt>模型一致性</dt><dd>{{ window.consensus_label }}</dd></div>
+            <div><dt>趋势</dt><dd>{{ window.trend_label }}</dd></div>
           </dl>
         {% else %}
-          <p class="empty-card">No qualifying window</p>
-          <span class="muted">{{ day.hours|length }} stored hourly points</span>
+          <p class="empty-card">暂无符合条件的观景窗口</p>
+          <span class="muted">{{ day.hours|length }} 个已保存的逐小时数据点</span>
         {% endif %}
       </a>
     {% else %}
-      <div class="empty-state">No stored forecast rows cover the selected dates. Use Refresh forecast or start the snapshot worker.</div>
+      <div class="empty-state">所选日期暂无已保存的预报数据。请刷新预报或启动快照任务。</div>
     {% endfor %}
   </div>
 </section>
 
 <section class="section-block" aria-labelledby="hourly-heading">
   <div class="section-heading">
-    <div><p class="eyebrow">Selected day · {{ selected_day.label if selected_day else '—' }}</p><h2 id="hourly-heading">Reachable hourly forecast</h2></div>
-    <span class="muted">{{ settings.timezone }} · {{ filter_hours[0] }}:00–{{ filter_hours[1] }}:00</span>
+    <div><p class="eyebrow">已选日期 · {{ selected_day.label if selected_day else '—' }}</p><h2 id="hourly-heading">可到达时段逐小时预测</h2></div>
+    <span class="muted">日本时间（JST） · {{ filter_hours[0] }}:00–{{ filter_hours[1] }}:00</span>
   </div>
   {% if selected_day and selected_day.hours %}
     <div class="table-wrap">
       <table class="data-table hourly-table">
-        <thead><tr><th scope="col">Time</th><th scope="col">Proxy</th><th scope="col">Consensus</th><th scope="col">Cloud mid</th><th scope="col">Visibility</th><th scope="col">Models</th><th scope="col">Reachability</th></tr></thead>
+        <thead><tr><th scope="col">时间</th><th scope="col">综合评分</th><th scope="col">模型共识</th><th scope="col">中层云量</th><th scope="col">能见度</th><th scope="col">模型</th><th scope="col">可到达性</th></tr></thead>
         <tbody>
         {% for hour in selected_day.hours %}
           <tr class="{% if not hour.reachable %}is-unreachable{% elif hour.qualifies %}is-qualifying{% endif %}">
             <th scope="row">{{ hour.local_time }}</th>
             <td><strong>{{ hour.proxy_median|number(0) }}</strong><small class="subvalue">{{ hour.proxy_min|number(0) }}–{{ hour.proxy_max|number(0) }}</small></td>
-            <td><span class="label label-{{ hour.consensus|lower|replace('_', '-') }}">{{ hour.consensus }}</span></td>
+            <td><span class="label label-{{ hour.consensus|lower|replace('_', '-') }}">{{ hour.consensus_label }}</span></td>
             <td>{{ hour.mid_cloud_median|number(0) }}%</td>
             <td>{{ hour.visibility_median_km|kilometers(1) }}</td>
-            <td>{{ hour.full_model_count }}/{{ hour.model_count }} full</td>
-            <td>{% if hour.qualifies %}<span class="label label-good">qualifies</span>{% elif not hour.reachable %}<span class="label label-muted">before arrival</span>{% else %}<span class="label label-muted">does not qualify</span>{% endif %}</td>
+            <td>{{ hour.coverage_label }}</td>
+            <td>{% if not hour.reachable %}<span class="label label-muted">到达前</span>{% elif hour.qualifies %}<span class="label label-good">可到达</span>{% else %}<span class="label label-muted">不符合条件</span>{% endif %}</td>
           </tr>
         {% endfor %}
         </tbody>
@@ -144,57 +143,57 @@
     <div class="mobile-hour-list">
       {% for hour in selected_day.hours %}
         <article class="hour-card{% if hour.qualifies %} is-qualifying{% elif not hour.reachable %} is-unreachable{% endif %}">
-          <div class="hour-card-head"><strong>{{ hour.local_time }}</strong><span class="label label-{{ hour.consensus|lower|replace('_', '-') }}">{{ hour.consensus }}</span></div>
-          <div class="hour-main-metric"><strong>{{ hour.proxy_median|number(0) }}</strong><span>Proxy median</span></div>
-          <dl class="compact-metrics two-columns"><div><dt>Cloud mid</dt><dd>{{ hour.mid_cloud_median|number(0) }}%</dd></div><div><dt>Visibility</dt><dd>{{ hour.visibility_median_km|kilometers(1) }}</dd></div><div><dt>Models</dt><dd>{{ hour.full_model_count }}/{{ hour.model_count }} full</dd></div><div><dt>Window</dt><dd>{% if hour.qualifies %}qualifies{% elif not hour.reachable %}before arrival{% else %}not qualified{% endif %}</dd></div></dl>
+          <div class="hour-card-head"><strong>{{ hour.local_time }}</strong><span class="label label-{{ hour.consensus|lower|replace('_', '-') }}">{{ hour.consensus_label }}</span></div>
+          <div class="hour-main-metric"><strong>{{ hour.proxy_median|number(0) }}</strong><span>综合评分中位数</span></div>
+          <dl class="compact-metrics two-columns"><div><dt>中层云量</dt><dd>{{ hour.mid_cloud_median|number(0) }}%</dd></div><div><dt>能见度</dt><dd>{{ hour.visibility_median_km|kilometers(1) }}</dd></div><div><dt>模型</dt><dd>{{ hour.coverage_label }}</dd></div><div><dt>可到达性</dt><dd>{% if not hour.reachable %}到达前{% elif hour.qualifies %}可到达{% else %}不符合条件{% endif %}</dd></div></dl>
         </article>
       {% endfor %}
     </div>
   {% else %}
-    <div class="empty-state">No stored hourly forecast covers this day and location.</div>
+    <div class="empty-state">这一天和地点暂无已保存的逐小时预报。</div>
   {% endif %}
 </section>
 
 <div class="two-panel-grid">
   <section class="card panel" aria-labelledby="consensus-heading">
-    <div class="section-heading compact"><div><p class="eyebrow">Model agreement</p><h2 id="consensus-heading">Consensus snapshot</h2></div></div>
+    <div class="section-heading compact"><div><p class="eyebrow">模型一致性</p><h2 id="consensus-heading">模型共识</h2></div></div>
     {% if selected_day and selected_day.hours %}
       {% set focus_hour = selected_day.hours[0] %}
-      <div class="focus-summary"><span class="focus-time">{{ focus_hour.local_time }}</span><span class="label label-{{ focus_hour.consensus|lower|replace('_', '-') }}">{{ focus_hour.consensus }}</span><strong>{{ focus_hour.proxy_median|number(0) }} Proxy</strong></div>
-      <p class="muted">{{ focus_hour.models_good_proxy }} of {{ focus_hour.full_model_count }} full models meet the Proxy threshold. Outliers: {{ focus_hour.outlier_models|join(', ') if focus_hour.outlier_models else 'none' }}.</p>
+      <div class="focus-summary"><span class="focus-time">{{ focus_hour.local_time }}</span><span class="label label-{{ focus_hour.consensus|lower|replace('_', '-') }}">{{ focus_hour.consensus_label }}</span><strong>{{ focus_hour.proxy_median|number(0) }} 分</strong></div>
+      <p class="muted">目前有 {{ focus_hour.models_good_proxy }} 个模型达到综合评分阈值。离群模型：{{ focus_hour.outlier_models|join('、') if focus_hour.outlier_models else '无' }}。</p>
       <div class="vote-list">
-        {% for model in focus_hour.models %}<div class="vote-row"><span>{{ model.model }}</span><span class="vote-score">{{ model.proxy|number(0) }}</span><span class="label label-{{ 'full' if model.full_model else 'partial' }}">{{ 'full' if model.full_model else 'partial' }}</span></div>{% endfor %}
+        {% for model in focus_hour.models %}<div class="vote-row"><span>{{ model.model }}</span><span class="vote-score">{{ model.proxy|number(0) }}</span><span class="label label-{{ 'full' if model.full_model else 'partial' }}">{{ '完整' if model.full_model else '部分数据' }}</span></div>{% endfor %}
       </div>
-    {% else %}<div class="empty-state">No consensus rows to display.</div>{% endif %}
+    {% else %}<div class="empty-state">暂无可显示的模型共识数据。</div>{% endif %}
   </section>
 
   <section class="card panel" aria-labelledby="trend-heading">
-    <div class="section-heading compact"><div><p class="eyebrow">Forecast drift</p><h2 id="trend-heading">Is the view changing?</h2></div></div>
+    <div class="section-heading compact"><div><p class="eyebrow">预测变化趋势</p><h2 id="trend-heading">预报是在改善还是恶化？</h2></div></div>
     <div class="trend-controls">
-      <label><span>Date</span><select data-trend-date>{% for day in payload.days %}<option value="{{ day.date }}"{% if day.date == payload.selected_date %} selected{% endif %}>{{ day.label }}</option>{% endfor %}</select></label>
-      <label><span>Hour</span><select data-trend-hour>{% if selected_day %}{% for hour in selected_day.hours %}<option value="{{ hour.local_time }}">{{ hour.local_time }}</option>{% endfor %}{% endif %}</select></label>
-      <label><span>Metric</span><select data-trend-variable><option value="proxy">Proxy</option><option value="mid_cloud">Mid cloud</option><option value="visibility">Visibility</option></select></label>
+      <label><span>日期</span><select data-trend-date>{% for day in payload.days %}<option value="{{ day.date }}"{% if day.date == payload.selected_date %} selected{% endif %}>{{ day.label }}</option>{% endfor %}</select></label>
+      <label><span>时段</span><select data-trend-hour>{% if selected_day %}{% for hour in selected_day.hours %}<option value="{{ hour.local_time }}">{{ hour.local_time }}</option>{% endfor %}{% endif %}</select></label>
+      <label><span>指标</span><select data-trend-variable><option value="proxy">综合评分</option><option value="mid_cloud">中层云量</option><option value="visibility">能见度</option></select></label>
     </div>
-    <div class="trend-summary" data-trend-summary>Loading stored drift…</div>
-    <div class="chart-wrap"><svg class="trend-chart" data-trend-chart viewBox="0 0 560 180" role="img" aria-label="Forecast drift chart"></svg></div>
+    <div class="trend-summary" data-trend-summary>正在加载已保存的趋势…</div>
+    <div class="chart-wrap"><svg class="trend-chart" data-trend-chart viewBox="0 0 560 180" role="img" aria-label="预测变化趋势图"></svg></div>
   </section>
 </div>
 
 <section class="card panel diagnostics-panel" aria-labelledby="model-diagnostics-heading">
   <details open>
-    <summary><span><p class="eyebrow">Diagnostics</p><h2 id="model-diagnostics-heading">Model coverage and failures</h2></span><span class="muted">{{ selected_day.models|length if selected_day else 0 }} models in selected day</span></summary>
+    <summary><span><p class="eyebrow">诊断</p><h2 id="model-diagnostics-heading">模型数据覆盖与异常</h2></span><span class="muted">选定日期 {{ selected_day.models|length if selected_day else 0 }} 个模型</span></summary>
     {% if selected_day and selected_day.models %}
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>Model</th><th>Status</th><th>Supported</th><th>Missing required</th><th>Error</th></tr></thead><tbody>
-      {% for model in selected_day.models %}<tr><th>{{ model.model }}</th><td><span class="label label-{{ model.status|lower }}">{{ model.status }}</span></td><td>{{ 'yes' if model.supported else 'no' }}</td><td>{{ model.missing_required|join(', ') if model.missing_required else '—' }}</td><td>{{ model.error or '—' }}</td></tr>{% endfor %}
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>状态</th><th>支持</th><th>缺失必需字段</th><th>错误</th></tr></thead><tbody>
+      {% for model in selected_day.models %}<tr><th>{{ model.model }}</th><td><span class="label label-{{ model.status|lower }}">{{ model.status_label }}</span></td><td>{{ '是' if model.supported else '否' }}</td><td>{{ model.missing_required|join('、') if model.missing_required else '—' }}</td><td>{{ model.error or '—' }}</td></tr>{% endfor %}
       </tbody></table></div>
     {% endif %}
-    {% if selected_day and selected_day.failures %}<h3>Refresh failures</h3><ul class="failure-list">{% for failure in selected_day.failures %}<li><strong>{{ failure.model }}</strong> — {{ failure.reason }}</li>{% endfor %}</ul>{% endif %}
+    {% if selected_day and selected_day.failures %}<h3>刷新异常</h3><ul class="failure-list">{% for failure in selected_day.failures %}<li><strong>{{ failure.model }}</strong> — {{ failure.reason }}</li>{% endfor %}</ul>{% endif %}
   </details>
 </section>
 
-<p class="page-note">Proxy is a transparent local proxy score built from visibility, cloud, precipitation, and humidity. The dashboard does not scrape or reproduce a private third-party score.</p>
+<p class="page-note">综合评分是根据能见度、云量、降水和湿度计算的透明本地代理分数。本仪表盘不会抓取或复现第三方私有评分。</p>
 {% endblock %}
 
 {% block scripts %}
-<script>window.__FUJI_DASHBOARD__ = {{ payload|tojson }};</script>
+<script>window.__FUJI_DASHBOARD__ = {{ payload.client|tojson }};</script>
 {% endblock %}

@@ -10,6 +10,19 @@ from ..decision import DecisionDay, DecisionHour, DecisionResult, DecisionWindow
 from ..services import DashboardData
 from ..stability import StabilityMetrics, StabilityPoint
 from ..time_utils import canonical_iso, to_jst
+from .i18n import (
+    CONSENSUS_LABELS,
+    DECISION_LABELS,
+    FRESHNESS_LABELS,
+    MODEL_STATUS_LABELS,
+    REFRESH_STATUS_LABELS,
+    STABILITY_LABELS,
+    TREND_LABELS,
+    label,
+    localized_coverage,
+    localized_date,
+    localized_rationale,
+)
 
 
 def dashboard_payload(data: DashboardData, *, selected_date: date | None = None) -> dict[str, object]:
@@ -17,31 +30,57 @@ def dashboard_payload(data: DashboardData, *, selected_date: date | None = None)
     day_by_date = {day.date: day for day in data.decision.days}
     selected = selected_date or _default_selected_date(data.decision, data.dates)
     selected_result = result_by_date.get(selected)
+    days = [
+        day_payload(
+            target_date,
+            result_by_date.get(target_date),
+            day_by_date.get(target_date),
+            data.stability_by_time,
+        )
+        for target_date in data.dates
+    ]
+    status = {
+        **data.status,
+        "freshness_label": label(FRESHNESS_LABELS, str(data.status.get("freshness"))),
+        "last_refresh_status_label": label(
+            REFRESH_STATUS_LABELS, str(data.status.get("last_refresh_status"))
+        ),
+        "coverage_label": localized_coverage(
+            int(data.status.get("full_models", 0)),
+            int(data.status.get("configured_models", 0)),
+        ),
+    }
     return {
         "generated_at": canonical_iso(datetime.now().astimezone()),
         "selected_date": None if selected_result is None else selected.isoformat(),
-        "status": data.status,
+        "status": status,
         "decision": decision_payload(data.decision),
-        "days": [
-            day_payload(
-                target_date,
-                result_by_date.get(target_date),
-                day_by_date.get(target_date),
-                data.stability_by_time,
-            )
-            for target_date in data.dates
-        ],
+        "days": days,
+        # Keep the browser bootstrap payload free of internal English state labels.
+        "client": {
+            "status": {"location": data.status.get("location", "")},
+            "days": [
+                {
+                    "date": day["date"],
+                    "hours": [{"local_time": hour["local_time"]} for hour in day["hours"]],
+                }
+                for day in days
+            ],
+        },
     }
 
 
 def decision_payload(result: DecisionResult) -> dict[str, object]:
     return {
         "status": result.status,
+        "status_label": label(DECISION_LABELS, result.status),
         "winner_date": None if result.winner is None else result.winner.date.isoformat(),
+        "winner_date_label": None if result.winner is None else localized_date(result.winner.date),
         "no_clear_winner": result.no_clear_winner,
         "min_proxy": result.min_proxy,
         "min_window_hours": result.min_window_hours,
         "rationale": list(result.rationale),
+        "rationale_label": localized_rationale(result.rationale),
         "days": [
             {
                 "date": day.date.isoformat(),
@@ -62,7 +101,7 @@ def day_payload(
     if result is None:
         return {
             "date": target_date.isoformat(),
-            "label": target_date.strftime("%a %b %-d"),
+            "label": localized_date(target_date),
             "best_window": None,
             "hours": [],
             "models": [],
@@ -91,7 +130,7 @@ def day_payload(
         ]
     return {
         "date": target_date.isoformat(),
-        "label": target_date.strftime("%a %b %-d"),
+        "label": localized_date(target_date),
         "best_window": window_payload(decision_day.best_window if decision_day else None),
         "hours": selected_hours,
         "models": model_diagnostics(result),
@@ -127,6 +166,10 @@ def hour_payload(
         "models_good_visibility": hour.models_good_visibility,
         "models_good_precip": hour.models_good_precip,
         "consensus": hour.consensus_label,
+        "consensus_label": label(CONSENSUS_LABELS, hour.consensus_label),
+        "reachability_label": "可到达" if (decision_hour is None or decision_hour.reachable) else "到达前",
+        "window_label": "符合条件" if (decision_hour is not None and decision_hour.qualifies) else "不符合条件",
+        "coverage_label": localized_coverage(hour.full_model_count, hour.model_count),
         "outlier_models": list(hour.outlier_models),
         "stability": stability_payload(stability),
         "models": [
@@ -150,6 +193,9 @@ def model_diagnostics(result: ConsensusResult) -> list[dict[str, object]]:
         {
             "model": member.model,
             "status": "FULL" if member.full_forecast else "PARTIAL",
+            "status_label": label(
+                MODEL_STATUS_LABELS, "FULL" if member.full_forecast else "PARTIAL"
+            ),
             "supported": member.capability.supported,
             "variables_available": sorted(member.capability.variables_available),
             "missing_required": sorted(member.capability.missing_required),
@@ -166,7 +212,9 @@ def trend_payload(metrics: StabilityMetrics, *, variable: str = "proxy") -> dict
     return {
         "variable": variable,
         "trend": metrics.trend_label,
+        "trend_label": label(TREND_LABELS, metrics.trend_label),
         "confidence": metrics.confidence,
+        "confidence_label": label(STABILITY_LABELS, metrics.confidence),
         "samples": metrics.samples,
         "latest_proxy": metrics.latest_proxy,
         "previous_proxy": metrics.previous_proxy,
@@ -203,8 +251,11 @@ def window_payload(window: DecisionWindow | None) -> dict[str, object] | None:
         "mean_proxy": window.mean_proxy,
         "minimum_proxy": window.minimum_proxy,
         "consensus": window.consensus_label,
+        "consensus_label": label(CONSENSUS_LABELS, window.consensus_label),
         "stability_confidence": window.stability_confidence,
+        "stability_confidence_label": label(STABILITY_LABELS, window.stability_confidence),
         "trend": window.trend_label,
+        "trend_label": label(TREND_LABELS, window.trend_label),
         "mid_cloud_max": window.mid_cloud_max,
         "visibility_min_km": window.visibility_min,
         "models_good_proxy": peak.models_good_proxy,
@@ -222,7 +273,9 @@ def stability_payload(metrics: StabilityMetrics | None) -> dict[str, object]:
     if metrics is None:
         return {
             "trend": "UNKNOWN",
+            "trend_label": label(TREND_LABELS, "UNKNOWN"),
             "confidence": "UNKNOWN",
+            "confidence_label": label(STABILITY_LABELS, "UNKNOWN"),
             "samples": 0,
             "delta_6h": None,
             "delta_12h": None,
@@ -231,7 +284,9 @@ def stability_payload(metrics: StabilityMetrics | None) -> dict[str, object]:
         }
     return {
         "trend": metrics.trend_label,
+        "trend_label": label(TREND_LABELS, metrics.trend_label),
         "confidence": metrics.confidence,
+        "confidence_label": label(STABILITY_LABELS, metrics.confidence),
         "samples": metrics.samples,
         "delta_last_snapshot": metrics.delta_last_snapshot,
         "delta_6h": metrics.delta_6h,

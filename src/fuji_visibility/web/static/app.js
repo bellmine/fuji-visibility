@@ -3,6 +3,14 @@
 
   const dashboard = window.__FUJI_DASHBOARD__ || null;
   const query = (selector) => document.querySelector(selector);
+  const TREND_LABELS = {
+    IMPROVING: "改善中",
+    WORSENING: "恶化中",
+    STABLE: "稳定",
+    VOLATILE: "波动较大",
+    UNKNOWN: "未知"
+  };
+  const CONFIDENCE_LABELS = { HIGH: "高", MEDIUM: "中", LOW: "低", UNKNOWN: "未知" };
 
   function setRefreshMessage(message, kind) {
     const target = query("[data-refresh-message]");
@@ -17,8 +25,8 @@
     const label = button.querySelector("[data-refresh-label]");
     button.addEventListener("click", async function () {
       button.disabled = true;
-      if (label) label.textContent = "Refreshing…";
-      setRefreshMessage("Fetching the configured models and saving a new snapshot…");
+      if (label) label.textContent = "刷新中…";
+      setRefreshMessage("正在获取已配置的模型并保存新的预报快照…");
       try {
         const response = await fetch("/api/refresh", {
           method: "POST",
@@ -27,15 +35,15 @@
         });
         const body = await response.json().catch(() => ({}));
         if (!response.ok) {
-          const retry = body.retry_after_seconds ? ` Try again in ${body.retry_after_seconds}s.` : "";
-          throw new Error((body.message || body.detail || "Refresh failed.") + retry);
+          const retry = body.retry_after_seconds ? `请在 ${body.retry_after_seconds} 秒后再试。` : "";
+          throw new Error((body.message || "预报刷新失败，请稍后重试。") + retry);
         }
-        setRefreshMessage(body.message || "Refresh complete. Reloading…");
+        setRefreshMessage(body.message || "预报刷新完成，正在重新加载…");
         window.setTimeout(() => window.location.reload(), 500);
       } catch (error) {
         button.disabled = false;
-        if (label) label.textContent = "Refresh forecast";
-        setRefreshMessage(error instanceof Error ? error.message : "Refresh failed.", "error");
+        if (label) label.textContent = "刷新预报";
+        setRefreshMessage(error instanceof Error ? error.message : "预报刷新失败，请稍后重试。", "error");
       }
     });
   }
@@ -60,6 +68,21 @@
     }
   }
 
+  function formatJstDateTime(value) {
+    const parsed = new Date(value);
+    if (Number.isNaN(parsed.getTime())) return String(value);
+    const parts = new Intl.DateTimeFormat("zh-CN", {
+      timeZone: "Asia/Tokyo",
+      month: "numeric",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false
+    }).formatToParts(parsed);
+    const part = (type) => (parts.find((item) => item.type === type) || {}).value || "";
+    return `${part("month")}月${part("day")}日 ${part("hour")}:${part("minute")}`;
+  }
+
   function svgElement(name, attributes) {
     const element = document.createElementNS("http://www.w3.org/2000/svg", name);
     Object.entries(attributes).forEach(([key, value]) => element.setAttribute(key, String(value)));
@@ -71,7 +94,7 @@
     const points = (payload.points || []).filter((point) => typeof point.value === "number");
     if (!points.length) {
       const empty = svgElement("text", { x: 280, y: 92, "text-anchor": "middle", class: "chart-empty" });
-      empty.textContent = "No stored drift points yet";
+      empty.textContent = "暂时没有已保存的变化趋势数据";
       svg.appendChild(empty);
       return;
     }
@@ -106,16 +129,16 @@
     points.forEach((point, index) => {
       const circle = svgElement("circle", { cx: x(index), cy: y(point.value), r: 4, class: "chart-point" });
       const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
-      title.textContent = `${point.retrieved_at}: ${point.value.toFixed(1)}`;
+      title.textContent = `${formatJstDateTime(point.retrieved_at)} JST：${point.value.toFixed(1)}`;
       circle.appendChild(title);
       svg.appendChild(circle);
     });
     const first = svgElement("text", { x: left, y: height - 7, class: "chart-label" });
-    first.textContent = points[0].retrieved_at.slice(5, 16).replace("T", " ");
+    first.textContent = formatJstDateTime(points[0].retrieved_at);
     svg.appendChild(first);
     if (points.length > 1) {
       const last = svgElement("text", { x: width - right, y: height - 7, "text-anchor": "end", class: "chart-label" });
-      last.textContent = points[points.length - 1].retrieved_at.slice(5, 16).replace("T", " ");
+      last.textContent = formatJstDateTime(points[points.length - 1].retrieved_at);
       svg.appendChild(last);
     }
   }
@@ -124,27 +147,29 @@
     const dateValue = dateSelect && dateSelect.value;
     const hourValue = hourSelect && hourSelect.value;
     if (!dateValue || !hourValue || !svg) {
-      if (summary) summary.textContent = "Select a stored day and hour to inspect drift.";
+      if (summary) summary.textContent = "请选择已有数据的日期和时段以查看趋势。";
       if (svg) renderChart({ points: [] }, svg);
       return;
     }
     const variable = variableSelect ? variableSelect.value : "proxy";
     const location = dashboard && dashboard.status ? dashboard.status.location : "";
-    if (summary) summary.textContent = "Loading stored drift…";
+    if (summary) summary.textContent = "正在加载已保存的趋势…";
     try {
       const params = new URLSearchParams({ date: dateValue, hour: hourValue, variable });
       if (location) params.set("location", location);
       const response = await fetch(`/api/trend?${params.toString()}`, { credentials: "same-origin" });
       const payload = await response.json();
-      if (!response.ok) throw new Error(payload.detail || "Trend unavailable");
+      if (!response.ok) throw new Error(payload.message || "趋势数据暂时无法获取。");
       const latest = payload.points && payload.points.length ? payload.points[payload.points.length - 1].value : null;
       if (summary) {
-        const latestText = typeof latest === "number" ? ` Latest: ${latest.toFixed(1)}.` : "";
-        summary.textContent = `${payload.trend} · ${payload.confidence} confidence · ${payload.samples} stored collections.${latestText}`;
+        const trend = payload.trend_label || TREND_LABELS[payload.trend] || "未知";
+        const confidence = payload.confidence_label || CONFIDENCE_LABELS[payload.confidence] || "未知";
+        const latestText = typeof latest === "number" ? ` 最新值：${latest.toFixed(1)}。` : "";
+        summary.textContent = `${trend} · ${confidence}可信度 · ${payload.samples} 次已保存采集。${latestText}`;
       }
       renderChart(payload, svg);
     } catch (error) {
-      if (summary) summary.textContent = error instanceof Error ? error.message : "Trend unavailable";
+      if (summary) summary.textContent = error instanceof Error ? error.message : "趋势数据暂时无法获取。";
       renderChart({ points: [] }, svg);
     }
   }
