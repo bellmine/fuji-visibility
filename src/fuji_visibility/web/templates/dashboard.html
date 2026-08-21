@@ -1,0 +1,200 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard · Mt. Fuji Visibility{% endblock %}
+
+{% block content %}
+{% set status = payload.status %}
+{% set decision = payload.decision %}
+<div class="page-heading">
+  <div>
+    <p class="eyebrow">Fuji Five Lakes · {{ location.name }}</p>
+    <h1>When is Mt. Fuji most likely to be visible?</h1>
+    <p class="lede">A rules-based view of stored multi-model forecasts. It is evidence for planning, not a guarantee.</p>
+  </div>
+  <div class="freshness-block status-{{ status.freshness|lower }}">
+    <span class="status-dot" aria-hidden="true"></span>
+    <div>
+      <strong>{{ status.freshness }}</strong>
+      <span class="muted">{{ status.last_successful_snapshot|local_datetime }}</span>
+    </div>
+  </div>
+</div>
+
+{% if error %}
+  <div class="notice notice-error" role="alert">{{ error }}</div>
+{% endif %}
+
+{% if status.freshness in ["STALE", "WARNING", "UNKNOWN"] or status.last_refresh_status == "partial" %}
+  <div class="notice notice-warning">
+    <strong>Data quality note:</strong>
+    {% if status.freshness == "STALE" %}the latest stored snapshot is old.{% elif status.freshness == "WARNING" %}the latest snapshot is aging.{% elif status.freshness == "UNKNOWN" %}no successful snapshot timestamp is available.{% endif %}
+    {% if status.last_refresh_status == "partial" %}Some configured models did not return complete data.{% endif %}
+    The dashboard will keep showing the stored evidence until the next refresh succeeds.
+  </div>
+{% endif %}
+
+<section class="toolbar card" aria-label="Dashboard controls">
+  <form method="get" action="/" class="filter-form">
+    <label>
+      <span>Location</span>
+      <select name="location">
+        <option value="kawaguchiko"{% if location.name == "kawaguchiko" %} selected{% endif %}>Kawaguchiko</option>
+        <option value="oishi"{% if location.name == "oishi" %} selected{% endif %}>Oishi Park</option>
+        <option value="shojiko"{% if location.name == "shojiko" %} selected{% endif %}>Shojiko</option>
+      </select>
+    </label>
+    <label>
+      <span>Hours</span>
+      <input name="hours" inputmode="numeric" value="{{ filter_hours[0] }}-{{ filter_hours[1] }}" aria-label="Hour range, for example 5-12">
+    </label>
+    <label>
+      <span>Arrival after</span>
+      <input name="arrival_after" type="time" value="{{ filter_arrival_after.strftime('%H:%M') }}">
+    </label>
+    <button class="button button-secondary" type="submit">Apply</button>
+  </form>
+  <button class="button button-primary refresh-button" type="button" data-refresh>
+    <span data-refresh-label>Refresh forecast</span>
+  </button>
+  <p class="form-hint" data-refresh-message>Manual refresh is rate-limited to once every {{ settings.manual_refresh_cooldown_seconds // 60 }} minutes. Automatic snapshots run every {{ settings.snapshot_interval_hours }} hours.</p>
+</section>
+
+<section class="decision-card card status-{{ decision.status|lower|replace(' ', '-') }}" aria-labelledby="decision-heading">
+  <div class="decision-topline">
+    <div>
+      <p class="eyebrow">Decision</p>
+      <h2 id="decision-heading">{{ decision.status }}</h2>
+    </div>
+    <span class="decision-badge">{{ decision.status }}</span>
+  </div>
+  {% set winner = namespace(window=None) %}
+  {% for candidate in decision.days %}
+    {% if candidate.date == decision.winner_date %}{% set winner.window = candidate.best_window %}{% endif %}
+  {% endfor %}
+  {% if decision.winner_date and winner.window %}
+    <p class="decision-summary"><strong>{{ decision.winner_date }}</strong> has the best reachable qualifying window, peaking at <strong>{{ winner.window.peak_proxy_median|number(0) }}</strong> Proxy.</p>
+    <div class="metric-row">
+      <div><span>Reachable window</span><strong>{{ winner.window.start|local_datetime }} – {{ winner.window.end|local_datetime }}</strong></div>
+      <div><span>Consensus</span><strong>{{ winner.window.consensus }}</strong></div>
+      <div><span>Stability</span><strong>{{ winner.window.stability_confidence }}</strong></div>
+      <div><span>Trend</span><strong>{{ winner.window.trend }}</strong></div>
+    </div>
+  {% elif decision.status == "NO CLEAR WINNER" %}
+    <p class="decision-summary">Several days qualify, but the evidence is too close to call. Keep the plan flexible and recheck after the next model cycle.</p>
+  {% else %}
+    <p class="decision-summary">No day currently meets the reachable-window, Proxy, model-count, and consensus rules. This is a valid result—not a missing recommendation.</p>
+  {% endif %}
+  <ul class="rationale">
+    {% for item in decision.rationale %}<li>{{ item }}</li>{% endfor %}
+  </ul>
+</section>
+
+<section class="section-block" aria-labelledby="days-heading">
+  <div class="section-heading">
+    <div><p class="eyebrow">Next {{ payload.days|length }} days</p><h2 id="days-heading">Upcoming conditions</h2></div>
+    <span class="muted">{{ status.configured_models }} configured models · {{ status.full_models }} full in latest refresh</span>
+  </div>
+  <div class="day-grid">
+    {% for day in payload.days %}
+      {% set window = day.best_window %}
+      <a class="day-card{% if day.date == payload.selected_date %} is-selected{% endif %}" href="/?date={{ day.date }}{% if location.name %}&location={{ location.name }}{% endif %}">
+        <div class="day-card-head"><strong>{{ day.label }}</strong>{% if day.date == decision.winner_date %}<span class="mini-badge">winner</span>{% endif %}</div>
+        {% if window %}
+          <div class="day-score"><span>{{ window.peak_proxy_median|number(0) }}</span><small>Proxy peak</small></div>
+          <dl class="compact-metrics">
+            <div><dt>Window</dt><dd>{{ window.start|local_datetime }}–{{ window.end|local_datetime }}</dd></div>
+            <div><dt>Consensus</dt><dd>{{ window.consensus }}</dd></div>
+            <div><dt>Trend</dt><dd>{{ window.trend }}</dd></div>
+          </dl>
+        {% else %}
+          <p class="empty-card">No qualifying window</p>
+          <span class="muted">{{ day.hours|length }} stored hourly points</span>
+        {% endif %}
+      </a>
+    {% else %}
+      <div class="empty-state">No stored forecast rows cover the selected dates. Use Refresh forecast or start the snapshot worker.</div>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="section-block" aria-labelledby="hourly-heading">
+  <div class="section-heading">
+    <div><p class="eyebrow">Selected day · {{ selected_day.label if selected_day else '—' }}</p><h2 id="hourly-heading">Reachable hourly forecast</h2></div>
+    <span class="muted">{{ settings.timezone }} · {{ filter_hours[0] }}:00–{{ filter_hours[1] }}:00</span>
+  </div>
+  {% if selected_day and selected_day.hours %}
+    <div class="table-wrap">
+      <table class="data-table hourly-table">
+        <thead><tr><th scope="col">Time</th><th scope="col">Proxy</th><th scope="col">Consensus</th><th scope="col">Cloud mid</th><th scope="col">Visibility</th><th scope="col">Models</th><th scope="col">Reachability</th></tr></thead>
+        <tbody>
+        {% for hour in selected_day.hours %}
+          <tr class="{% if not hour.reachable %}is-unreachable{% elif hour.qualifies %}is-qualifying{% endif %}">
+            <th scope="row">{{ hour.local_time }}</th>
+            <td><strong>{{ hour.proxy_median|number(0) }}</strong><small class="subvalue">{{ hour.proxy_min|number(0) }}–{{ hour.proxy_max|number(0) }}</small></td>
+            <td><span class="label label-{{ hour.consensus|lower|replace('_', '-') }}">{{ hour.consensus }}</span></td>
+            <td>{{ hour.mid_cloud_median|number(0) }}%</td>
+            <td>{{ hour.visibility_median_km|kilometers(1) }}</td>
+            <td>{{ hour.full_model_count }}/{{ hour.model_count }} full</td>
+            <td>{% if hour.qualifies %}<span class="label label-good">qualifies</span>{% elif not hour.reachable %}<span class="label label-muted">before arrival</span>{% else %}<span class="label label-muted">does not qualify</span>{% endif %}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <div class="mobile-hour-list">
+      {% for hour in selected_day.hours %}
+        <article class="hour-card{% if hour.qualifies %} is-qualifying{% elif not hour.reachable %} is-unreachable{% endif %}">
+          <div class="hour-card-head"><strong>{{ hour.local_time }}</strong><span class="label label-{{ hour.consensus|lower|replace('_', '-') }}">{{ hour.consensus }}</span></div>
+          <div class="hour-main-metric"><strong>{{ hour.proxy_median|number(0) }}</strong><span>Proxy median</span></div>
+          <dl class="compact-metrics two-columns"><div><dt>Cloud mid</dt><dd>{{ hour.mid_cloud_median|number(0) }}%</dd></div><div><dt>Visibility</dt><dd>{{ hour.visibility_median_km|kilometers(1) }}</dd></div><div><dt>Models</dt><dd>{{ hour.full_model_count }}/{{ hour.model_count }} full</dd></div><div><dt>Window</dt><dd>{% if hour.qualifies %}qualifies{% elif not hour.reachable %}before arrival{% else %}not qualified{% endif %}</dd></div></dl>
+        </article>
+      {% endfor %}
+    </div>
+  {% else %}
+    <div class="empty-state">No stored hourly forecast covers this day and location.</div>
+  {% endif %}
+</section>
+
+<div class="two-panel-grid">
+  <section class="card panel" aria-labelledby="consensus-heading">
+    <div class="section-heading compact"><div><p class="eyebrow">Model agreement</p><h2 id="consensus-heading">Consensus snapshot</h2></div></div>
+    {% if selected_day and selected_day.hours %}
+      {% set focus_hour = selected_day.hours[0] %}
+      <div class="focus-summary"><span class="focus-time">{{ focus_hour.local_time }}</span><span class="label label-{{ focus_hour.consensus|lower|replace('_', '-') }}">{{ focus_hour.consensus }}</span><strong>{{ focus_hour.proxy_median|number(0) }} Proxy</strong></div>
+      <p class="muted">{{ focus_hour.models_good_proxy }} of {{ focus_hour.full_model_count }} full models meet the Proxy threshold. Outliers: {{ focus_hour.outlier_models|join(', ') if focus_hour.outlier_models else 'none' }}.</p>
+      <div class="vote-list">
+        {% for model in focus_hour.models %}<div class="vote-row"><span>{{ model.model }}</span><span class="vote-score">{{ model.proxy|number(0) }}</span><span class="label label-{{ 'full' if model.full_model else 'partial' }}">{{ 'full' if model.full_model else 'partial' }}</span></div>{% endfor %}
+      </div>
+    {% else %}<div class="empty-state">No consensus rows to display.</div>{% endif %}
+  </section>
+
+  <section class="card panel" aria-labelledby="trend-heading">
+    <div class="section-heading compact"><div><p class="eyebrow">Forecast drift</p><h2 id="trend-heading">Is the view changing?</h2></div></div>
+    <div class="trend-controls">
+      <label><span>Date</span><select data-trend-date>{% for day in payload.days %}<option value="{{ day.date }}"{% if day.date == payload.selected_date %} selected{% endif %}>{{ day.label }}</option>{% endfor %}</select></label>
+      <label><span>Hour</span><select data-trend-hour>{% if selected_day %}{% for hour in selected_day.hours %}<option value="{{ hour.local_time }}">{{ hour.local_time }}</option>{% endfor %}{% endif %}</select></label>
+      <label><span>Metric</span><select data-trend-variable><option value="proxy">Proxy</option><option value="mid_cloud">Mid cloud</option><option value="visibility">Visibility</option></select></label>
+    </div>
+    <div class="trend-summary" data-trend-summary>Loading stored drift…</div>
+    <div class="chart-wrap"><svg class="trend-chart" data-trend-chart viewBox="0 0 560 180" role="img" aria-label="Forecast drift chart"></svg></div>
+  </section>
+</div>
+
+<section class="card panel diagnostics-panel" aria-labelledby="model-diagnostics-heading">
+  <details open>
+    <summary><span><p class="eyebrow">Diagnostics</p><h2 id="model-diagnostics-heading">Model coverage and failures</h2></span><span class="muted">{{ selected_day.models|length if selected_day else 0 }} models in selected day</span></summary>
+    {% if selected_day and selected_day.models %}
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>Model</th><th>Status</th><th>Supported</th><th>Missing required</th><th>Error</th></tr></thead><tbody>
+      {% for model in selected_day.models %}<tr><th>{{ model.model }}</th><td><span class="label label-{{ model.status|lower }}">{{ model.status }}</span></td><td>{{ 'yes' if model.supported else 'no' }}</td><td>{{ model.missing_required|join(', ') if model.missing_required else '—' }}</td><td>{{ model.error or '—' }}</td></tr>{% endfor %}
+      </tbody></table></div>
+    {% endif %}
+    {% if selected_day and selected_day.failures %}<h3>Refresh failures</h3><ul class="failure-list">{% for failure in selected_day.failures %}<li><strong>{{ failure.model }}</strong> — {{ failure.reason }}</li>{% endfor %}</ul>{% endif %}
+  </details>
+</section>
+
+<p class="page-note">Proxy is a transparent local proxy score built from visibility, cloud, precipitation, and humidity. The dashboard does not scrape or reproduce a private third-party score.</p>
+{% endblock %}
+
+{% block scripts %}
+<script>window.__FUJI_DASHBOARD__ = {{ payload|tojson }};</script>
+{% endblock %}

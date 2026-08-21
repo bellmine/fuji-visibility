@@ -37,6 +37,7 @@ from .formatting import (
 )
 from .exporting import export_consensus_text, export_text, select_rows
 from .open_meteo import OpenMeteoClient, OpenMeteoError
+from .services import fetch_consensus_days as fetch_service_consensus_days
 from .storage import ForecastStore, StorageError
 from .stability import consensus_stability, model_stability
 from .time_utils import JST, canonical_iso, iter_run_times, parse_clock, parse_date, parse_datetime
@@ -612,26 +613,15 @@ def _fetch_consensus_days(
     hours: tuple[int, int],
 ) -> list[tuple[object, ConsensusResult]]:
     del hours  # The API request covers the whole target date; CLI filtering follows.
-    daily_results: list[tuple[object, ConsensusResult]] = []
-    with OpenMeteoClient(verbose=_verbose(), timeout=REQUEST_TIMEOUT_SECONDS) as client:
-        fetcher = ConsensusFetcher(client)
-        for target_date in dates:
-            result = fetcher.fetch(
-                latitude,
-                longitude,
-                models=models,
-                model_kwargs={"start_date": target_date, "end_date": target_date},
-                cloud_strategy=cloud_strategy,
-            )
-            if not result.members:
-                detail = "; ".join(
-                    f"{failure.model}: {failure.reason}" for failure in result.failures
-                )
-                raise OpenMeteoError(
-                    f"No consensus models succeeded for {target_date}. {detail}"
-                )
-            daily_results.append((target_date, result))
-    return daily_results
+    return fetch_service_consensus_days(
+        latitude,
+        longitude,
+        dates,
+        models=models,
+        cloud_strategy=cloud_strategy,
+        verbose=_verbose(),
+        timeout=REQUEST_TIMEOUT_SECONDS,
+    )
 
 
 def _verbose() -> bool:

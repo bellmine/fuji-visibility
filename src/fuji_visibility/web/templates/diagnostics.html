@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Diagnostics · Mt. Fuji Visibility{% endblock %}
+
+{% block content %}
+<div class="page-heading">
+  <div><p class="eyebrow">Operational view</p><h1>Diagnostics</h1><p class="lede">Refresh state, stored-row counts, and model capability information. Secrets are intentionally not displayed.</p></div>
+  <a class="button button-secondary" href="/">Back to dashboard</a>
+</div>
+{% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
+
+{% if diagnostics %}
+<section class="metric-grid">
+  <div class="card stat-card"><span class="eyebrow">Application</span><strong>{{ diagnostics.version }}</strong><span class="muted">{{ diagnostics.location }}</span></div>
+  <div class="card stat-card"><span class="eyebrow">Database snapshots</span><strong>{{ diagnostics.snapshot_count }}</strong><span class="muted">{{ diagnostics.hourly_count }} hourly rows</span></div>
+  <div class="card stat-card"><span class="eyebrow">Last refresh</span><strong>{{ diagnostics.status.last_refresh_status }}</strong><span class="muted">{{ diagnostics.status.last_successful_snapshot|local_datetime }}</span></div>
+  <div class="card stat-card"><span class="eyebrow">Freshness</span><strong>{{ diagnostics.status.freshness }}</strong><span class="muted">{{ diagnostics.status.data_age_seconds if diagnostics.status.data_age_seconds is not none else '—' }} seconds old</span></div>
+</section>
+
+<section class="card panel">
+  <div class="section-heading compact"><div><p class="eyebrow">Configuration</p><h2>Runtime settings</h2></div></div>
+  <dl class="detail-grid">
+    <div><dt>Timezone</dt><dd>{{ diagnostics.status.timezone }}</dd></div>
+    <div><dt>Arrival after</dt><dd>{{ diagnostics.status.arrival_after }}</dd></div>
+    <div><dt>Hours</dt><dd>{{ diagnostics.status.hours.start }}:00–{{ diagnostics.status.hours.end }}:00</dd></div>
+    <div><dt>Configured models</dt><dd>{{ diagnostics.configured_models|join(', ') }}</dd></div>
+    <div><dt>SQLite path</dt><dd class="breakable">{{ diagnostics.database_path }}</dd></div>
+    <div><dt>Raw data directory</dt><dd class="breakable">{{ diagnostics.raw_data_dir }}</dd></div>
+  </dl>
+</section>
+
+<section class="card panel">
+  <div class="section-heading compact"><div><p class="eyebrow">Capabilities</p><h2>Latest model coverage</h2></div><span class="muted">Full means required inputs plus visibility</span></div>
+  {% if diagnostics.capabilities %}
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>Model</th><th>Status</th><th>Available variables</th><th>Missing required</th><th>Error</th></tr></thead><tbody>
+    {% for item in diagnostics.capabilities %}<tr><th>{{ item.model }}</th><td><span class="label label-{{ 'full' if item.full_forecast_available else 'partial' }}">{{ 'FULL' if item.full_forecast_available else 'PARTIAL' }}</span></td><td>{{ item.variables_available|join(', ') }}</td><td>{{ item.missing_required|join(', ') if item.missing_required else '—' }}</td><td>{{ item.error or '—' }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  {% else %}<div class="empty-state">No capability metadata yet. Run a snapshot refresh to populate this table.</div>{% endif %}
+</section>
+
+<section class="card panel">
+  <div class="section-heading compact"><div><p class="eyebrow">Failures</p><h2>Recent refresh failures</h2></div></div>
+  {% if diagnostics.failures %}<ul class="failure-list">{% for failure in diagnostics.failures %}<li><strong>{{ failure.model }}</strong> — {{ failure.reason }}</li>{% endfor %}</ul>{% else %}<p class="muted">No model failures recorded in the latest refresh.</p>{% endif %}
+  {% if diagnostics.status.last_refresh_error %}<p class="error-text">Last error: {{ diagnostics.status.last_refresh_error }}</p>{% endif %}
+</section>
+{% else %}
+<div class="empty-state">Diagnostics are not available.</div>
+{% endif %}
+{% endblock %}

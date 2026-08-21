@@ -16,10 +16,13 @@ or claim to reproduce its private score.
   labels.
 - A rules-based `decide` command that respects arrival time and prefers usable
   multi-hour windows.
+- A lightweight server-rendered web dashboard with a separate three-hour
+  snapshot worker, SQLite WAL storage, and JSON APIs.
 
-The project intentionally has no web frontend, background daemon, webcam
-scraper, or claim of forecast accuracy. Consensus uses equal model votes, and
-stability measures consistency between forecast runs rather than truth.
+The project intentionally has no webcam scraper or claim of forecast accuracy.
+Consensus uses equal model votes, and stability measures consistency between
+forecast runs rather than truth. The web dashboard is a presentation and
+control layer over the same Python domain functions used by the CLI.
 
 ## Setup
 
@@ -111,6 +114,25 @@ uv run fuji previous-runs 2026-08-26 --hour 09:00 --model auto
 
 Add `--verbose` before the command for request parameters, response metadata,
 and fingerprint progress.
+
+## Web dashboard
+
+Run the dashboard locally against the same SQLite data directory:
+
+```bash
+uv run uvicorn fuji_visibility.web.app:app --host 127.0.0.1 --port 8000
+```
+
+The page reads persisted snapshots. `POST /api/refresh` is the explicit network
+refresh path, and the scheduled worker can be started locally with:
+
+```bash
+uv run python -m fuji_visibility.snapshot_worker
+```
+
+For the private VPS deployment, use the supplied Docker Compose file and the
+manual Nginx Proxy Manager steps in [README_DEPLOY.md](README_DEPLOY.md). The
+compose file joins the existing `npm_default` network and exposes no host port.
 
 ## How to use this tool for a real trip decision
 

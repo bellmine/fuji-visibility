@@ -75,6 +75,11 @@ CREATE TABLE IF NOT EXISTS fingerprint_observations (
     label TEXT,
     notes TEXT
 );
+
+CREATE TABLE IF NOT EXISTS app_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -83,9 +88,11 @@ class ForecastStore:
         self.database_path = Path(database_path).expanduser()
         self.database_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            self._connection = sqlite3.connect(self.database_path)
+            self._connection = sqlite3.connect(self.database_path, timeout=5.0)
             self._connection.row_factory = sqlite3.Row
             self._connection.execute("PRAGMA foreign_keys = ON")
+            self._connection.execute("PRAGMA busy_timeout = 5000")
+            self._connection.execute("PRAGMA journal_mode = WAL")
             self._connection.executescript(SCHEMA)
             self._connection.commit()
         except sqlite3.OperationalError as exc:
@@ -269,6 +276,107 @@ class ForecastStore:
     def hourly_count(self) -> int:
         row = self._connection.execute("SELECT COUNT(*) AS count FROM hourly_forecasts").fetchone()
         return int(row["count"])
+
+    def set_metadata(self, key: str, value: str) -> None:
+        """Persist small application state without introducing another database."""
+
+        try:
+            self._connection.execute(
+                """
+                INSERT INTO app_metadata (key, value) VALUES (?, ?)
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """,
+                (key, value),
+            )
+            self._connection.commit()
+        except sqlite3.OperationalError as exc:
+            self._connection.rollback()
+            raise StorageError(f"Could not write application metadata: {exc}") from exc
+
+    def get_metadata(self, key: str, default: str | None = None) -> str | None:
+        try:
+            row = self._connection.execute(
+                "SELECT value FROM app_metadata WHERE key = ?", (key,)
+            ).fetchone()
+        except sqlite3.OperationalError as exc:
+            raise StorageError(f"Could not read application metadata: {exc}") from exc
+        return default if row is None else str(row["value"])
+
+    def get_metadata_map(self) -> dict[str, str]:
+        try:
+            rows = self._connection.execute("SELECT key, value FROM app_metadata").fetchall()
+        except sqlite3.OperationalError as exc:
+            raise StorageError(f"Could not read application metadata: {exc}") from exc
+        return {str(row["key"]): str(row["value"]) for row in rows}
+
+    def latest_snapshot_at(
+        self,
+        *,
+        latitude: float | None = None,
+        longitude: float | None = None,
+    ) -> str | None:
+        clauses: list[str] = []
+        params: list[object] = []
+        if latitude is not None:
+            clauses.append("ABS(requested_lat - ?) < 0.000001")
+            params.append(latitude)
+        if longitude is not None:
+            clauses.append("ABS(requested_lon - ?) < 0.000001")
+            params.append(longitude)
+        where = "WHERE " + " AND ".join(clauses) if clauses else ""
+        row = self._connection.execute(
+            f"SELECT MAX(retrieved_at) AS retrieved_at FROM forecast_snapshots {where}",
+            params,
+        ).fetchone()
+        return None if row is None or row["retrieved_at"] is None else str(row["retrieved_at"])
+
+    def latest_rows(
+        self,
+        start_time: str,
+        end_time: str,
+        *,
+        latitude: float,
+        longitude: float,
+        models: Iterable[str] | None = None,
+    ) -> list[StoredForecast]:
+        """Read the latest snapshot per model that covers the requested period."""
+
+        clauses = [
+            "ABS(s.requested_lat - ?) < 0.000001",
+            "ABS(s.requested_lon - ?) < 0.000001",
+            "h.valid_time >= ?",
+            "h.valid_time <= ?",
+        ]
+        params: list[object] = [latitude, longitude, start_time, end_time]
+        selected_models = list(models or ())
+        if selected_models:
+            placeholders = ",".join("?" for _ in selected_models)
+            clauses.append(f"s.model IN ({placeholders})")
+            params.extend(selected_models)
+        query = f"""
+            SELECT h.*, s.provider, s.model, s.requested_lat, s.requested_lon,
+                   s.returned_lat, s.returned_lon, s.elevation_m, s.retrieved_at
+            FROM hourly_forecasts AS h
+            JOIN forecast_snapshots AS s ON s.id = h.snapshot_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY s.retrieved_at DESC, s.id DESC, h.valid_time ASC, h.id ASC
+        """
+        try:
+            rows = self._connection.execute(query, params).fetchall()
+        except sqlite3.OperationalError as exc:
+            raise StorageError(f"Could not read latest forecast rows: {exc}") from exc
+
+        selected_snapshot_by_model: dict[str, int] = {}
+        selected_rows: list[sqlite3.Row] = []
+        for row in rows:
+            model = str(row["model"])
+            snapshot_id = int(row["snapshot_id"])
+            if model not in selected_snapshot_by_model:
+                selected_snapshot_by_model[model] = snapshot_id
+            if selected_snapshot_by_model[model] == snapshot_id:
+                selected_rows.append(row)
+        selected_rows.sort(key=lambda row: (str(row["valid_time"]), str(row["model"])))
+        return [_stored_forecast(row) for row in selected_rows]
 
 
 def _safe_filename(value: str) -> str:

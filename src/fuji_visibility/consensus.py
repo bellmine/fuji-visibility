@@ -28,6 +28,7 @@ from .models import (
     HourlyForecast,
     ModelCapability,
     ProxyScore,
+    StoredForecast,
 )
 from .open_meteo import OpenMeteoClient, OpenMeteoError
 from .scoring import proxy_score
@@ -260,6 +261,86 @@ def build_consensus(
         hours=tuple(hours),
         requested_lat=latitude,
         requested_lon=longitude,
+    )
+
+
+def build_consensus_from_stored(
+    rows: Iterable[StoredForecast],
+    *,
+    requested_models: Sequence[str] = CANDIDATE_MODELS,
+    failures: Sequence[ConsensusFailure] = (),
+    latitude: float | None = None,
+    longitude: float | None = None,
+    cloud_strategy: str = "mid",
+) -> ConsensusResult:
+    """Derive the same consensus statistics from persisted model snapshots.
+
+    The web dashboard intentionally reads stored snapshots instead of calling
+    Open-Meteo on every page request. Capability metadata is reconstructed from
+    the normalized rows, while the calculation itself remains ``build_consensus``.
+    """
+
+    grouped: dict[str, list[StoredForecast]] = {}
+    materialized = list(rows)
+    for row in materialized:
+        grouped.setdefault(row.model, []).append(row)
+    members: list[ForecastMember] = []
+    for model, model_rows in grouped.items():
+        capability = _capability_from_stored(model, model_rows)
+        first = model_rows[0]
+        members.append(
+            ForecastMember(
+                model=model,
+                forecast=ForecastResult(
+                    model=model,
+                    resolved_model=model,
+                    requested_lat=first.requested_lat,
+                    requested_lon=first.requested_lon,
+                    timezone="Asia/Tokyo",
+                    retrieved_at=max(row.retrieved_at for row in model_rows),
+                    hours=list(model_rows),
+                    raw_payload={"hourly": {}},
+                ),
+                capability=capability,
+            )
+        )
+    if latitude is None:
+        latitude = materialized[0].requested_lat if materialized else 0.0
+    if longitude is None:
+        longitude = materialized[0].requested_lon if materialized else 0.0
+    return build_consensus(
+        members,
+        requested_models=requested_models,
+        failures=failures,
+        latitude=latitude,
+        longitude=longitude,
+        cloud_strategy=cloud_strategy,
+    )
+
+
+def _capability_from_stored(model: str, rows: Sequence[StoredForecast]) -> ModelCapability:
+    available: set[str] = set()
+    if any(row.cloud_mid_pct is not None for row in rows):
+        available.add("cloud_cover_mid")
+    if any(row.relative_humidity_pct is not None for row in rows):
+        available.add("relative_humidity_2m")
+    if any(row.precipitation_probability_pct is not None for row in rows):
+        available.add("precipitation_probability")
+    if any(row.visibility_m is not None for row in rows):
+        available.add("visibility")
+    if any(row.temperature_c is not None for row in rows):
+        available.add("temperature_2m")
+    if any(row.cloud_low_pct is not None for row in rows):
+        available.add("cloud_cover_low")
+    if any(row.cloud_high_pct is not None for row in rows):
+        available.add("cloud_cover_high")
+    return ModelCapability(
+        model=model,
+        supported=True,
+        variables_available=available,
+        missing_required=set(MODEL_REQUIRED_VARIABLES - available),
+        missing_optional=set(MODEL_OPTIONAL_VARIABLES - available)
+        | ({"visibility"} if "visibility" not in available else set()),
     )
 
 
