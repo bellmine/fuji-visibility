@@ -44,6 +44,27 @@ LAST_MODEL_CAPABILITIES = "last_model_capabilities"
 APPLICATION_VERSION = "application_version"
 
 
+def _location_metadata_key(key: str, location_name: str) -> str:
+    """Namespace refresh metadata so one location cannot mask another."""
+
+    return f"{key}:{location_name}"
+
+
+def _scoped_metadata(
+    metadata: dict[str, str],
+    key: str,
+    *,
+    location_name: str,
+    default_location: str,
+) -> str | None:
+    scoped = metadata.get(_location_metadata_key(key, location_name))
+    if scoped is not None:
+        return scoped
+    # Preserve compatibility with databases created before multi-location
+    # refresh metadata was introduced.
+    return metadata.get(key) if location_name == default_location else None
+
+
 class RefreshCooldownError(RuntimeError):
     """Raised when a manual refresh is requested before the cooldown expires."""
 
@@ -203,6 +224,7 @@ class DashboardService:
         start = datetime.combine(min(selected_dates), time.min, tzinfo=JST)
         end = datetime.combine(max(selected_dates), time(23, 59, 59), tzinfo=JST)
         with ForecastStore(self.settings.database_path) as store:
+            metadata = store.get_metadata_map()
             rows = store.latest_rows(
                 canonical_iso(start),
                 canonical_iso(end),
@@ -210,7 +232,14 @@ class DashboardService:
                 longitude=preset.longitude,
                 models=self.settings.configured_models,
             )
-            failures = _metadata_failures(store.get_metadata(LAST_REFRESH_FAILURES))
+            failures = _metadata_failures(
+                _scoped_metadata(
+                    metadata,
+                    LAST_REFRESH_FAILURES,
+                    location_name=preset.name,
+                    default_location=self.settings.default_location,
+                )
+            )
             daily_results: list[tuple[date, ConsensusResult]] = []
             for target_date in selected_dates:
                 day_rows = [
@@ -300,8 +329,20 @@ class DashboardService:
         preset = self.location
         with ForecastStore(self.settings.database_path) as store:
             metadata = store.get_metadata_map()
-            status = self._status_from_store(store, preset.latitude, preset.longitude)
-            capabilities = _metadata_capabilities(metadata.get(LAST_MODEL_CAPABILITIES))
+            status = self._status_from_store(
+                store,
+                preset.latitude,
+                preset.longitude,
+                location_name=preset.name,
+            )
+            capabilities = _metadata_capabilities(
+                _scoped_metadata(
+                    metadata,
+                    LAST_MODEL_CAPABILITIES,
+                    location_name=preset.name,
+                    default_location=self.settings.default_location,
+                )
+            )
             if not capabilities or any(
                 "status" not in item or "supports" not in item for item in capabilities
             ):
@@ -345,7 +386,14 @@ class DashboardService:
                         ),
                     )
                 capabilities = [by_model[model] for model in self.settings.configured_models]
-            failures = _metadata_failures(metadata.get(LAST_REFRESH_FAILURES))
+            failures = _metadata_failures(
+                _scoped_metadata(
+                    metadata,
+                    LAST_REFRESH_FAILURES,
+                    location_name=preset.name,
+                    default_location=self.settings.default_location,
+                )
+            )
             return {
                 "version": __version__,
                 "database_path": str(self.settings.database_path),
@@ -375,18 +423,81 @@ class DashboardService:
                     if retry_after > 0:
                         raise RefreshCooldownError(retry_after)
                 store.set_metadata(LAST_REFRESH_ATTEMPT, canonical_iso(now))
+                for location_name in LOCATION_PRESETS:
+                    store.set_metadata(
+                        _location_metadata_key(LAST_REFRESH_ATTEMPT, location_name),
+                        canonical_iso(now),
+                    )
                 store.set_metadata(APPLICATION_VERSION, __version__)
             logger.info("%s refresh started", "manual" if manual else "scheduled")
             started = time_module.monotonic()
             try:
-                result = snapshot_all_models(
-                    self.location.latitude,
-                    self.location.longitude,
-                    days=self.settings.upcoming_days,
-                    models=self.settings.configured_models,
-                    database_path=self.settings.database_path,
-                    raw_directory=self.settings.raw_data_dir,
-                    timeout=REQUEST_TIMEOUT_SECONDS,
+                location_runs: list[tuple[str, SnapshotRun]] = []
+                for location_name, preset in LOCATION_PRESETS.items():
+                    try:
+                        location_run = snapshot_all_models(
+                            preset.latitude,
+                            preset.longitude,
+                            days=self.settings.upcoming_days,
+                            models=self.settings.configured_models,
+                            database_path=self.settings.database_path,
+                            raw_directory=self.settings.raw_data_dir,
+                            timeout=REQUEST_TIMEOUT_SECONDS,
+                        )
+                    except OpenMeteoError as exc:
+                        logger.warning(
+                            "refresh failed for location=%s: %s", location_name, exc
+                        )
+                        location_run = SnapshotRun(
+                            snapshot_ids=(),
+                            successful_models=(),
+                            failures=(
+                                ConsensusFailure(
+                                    model=f"{location_name}:refresh",
+                                    reason=str(exc),
+                                ),
+                            ),
+                            capabilities=(),
+                        )
+                    location_runs.append((location_name, location_run))
+
+                if not any(run.successful_models for _, run in location_runs):
+                    detail = "; ".join(
+                        f"{location_name}: {failure.reason}"
+                        for location_name, run in location_runs
+                        for failure in run.failures
+                    )
+                    raise OpenMeteoError(
+                        f"No configured location refresh succeeded. {detail}"
+                    )
+
+                default_run = next(
+                    run
+                    for location_name, run in location_runs
+                    if location_name == self.location.name
+                )
+                result = SnapshotRun(
+                    snapshot_ids=tuple(
+                        snapshot_id
+                        for _, run in location_runs
+                        for snapshot_id in run.snapshot_ids
+                    ),
+                    successful_models=tuple(
+                        dict.fromkeys(
+                            model
+                            for _, run in location_runs
+                            for model in run.successful_models
+                        )
+                    ),
+                    failures=tuple(
+                        ConsensusFailure(
+                            model=f"{location_name}/{failure.model}",
+                            reason=failure.reason,
+                        )
+                        for location_name, run in location_runs
+                        for failure in run.failures
+                    ),
+                    capabilities=default_run.capabilities,
                 )
                 status = "partial" if result.failures else "success"
                 failures_json = json.dumps(
@@ -403,10 +514,53 @@ class DashboardService:
                     store.set_metadata(LAST_REFRESH_FAILURES, failures_json)
                     store.set_metadata(LAST_MODEL_CAPABILITIES, capabilities_json)
                     store.set_metadata(APPLICATION_VERSION, __version__)
+                    for location_name, location_run in location_runs:
+                        location_failures_json = json.dumps(
+                            [failure.__dict__ for failure in location_run.failures],
+                            ensure_ascii=False,
+                        )
+                        location_capabilities_json = json.dumps(
+                            [
+                                _capability_payload(capability)
+                                for capability in location_run.capabilities
+                            ],
+                            ensure_ascii=False,
+                        )
+                        location_status = (
+                            "failed"
+                            if not location_run.successful_models
+                            else "partial"
+                            if location_run.failures
+                            else "success"
+                        )
+                        metadata_prefix = lambda key: _location_metadata_key(
+                            key, location_name
+                        )
+                        store.set_metadata(
+                            metadata_prefix(LAST_REFRESH_STATUS), location_status
+                        )
+                        store.set_metadata(
+                            metadata_prefix(LAST_REFRESH_ERROR),
+                            location_failures_json if location_run.failures else "",
+                        )
+                        store.set_metadata(
+                            metadata_prefix(LAST_REFRESH_FAILURES),
+                            location_failures_json,
+                        )
+                        store.set_metadata(
+                            metadata_prefix(LAST_MODEL_CAPABILITIES),
+                            location_capabilities_json,
+                        )
+                        if location_run.successful_models:
+                            store.set_metadata(
+                                metadata_prefix(LAST_REFRESH_SUCCESS),
+                                canonical_iso(self._now()),
+                            )
                 self.cleanup_raw()
                 logger.info(
-                    "refresh completed status=%s models=%s duration=%.2fs",
+                    "refresh completed status=%s locations=%s models=%s duration=%.2fs",
                     status,
+                    len(location_runs),
                     len(result.successful_models),
                     time_module.monotonic() - started,
                 )
@@ -444,10 +598,26 @@ class DashboardService:
         location_name: str | None = None,
     ) -> dict[str, object]:
         metadata = store.get_metadata_map()
+        scoped_location = location_name or self.settings.default_location
         latest = store.latest_snapshot_at(latitude=latitude, longitude=longitude)
-        last_success = metadata.get(LAST_REFRESH_SUCCESS) or latest
+        last_success = (
+            _scoped_metadata(
+                metadata,
+                LAST_REFRESH_SUCCESS,
+                location_name=scoped_location,
+                default_location=self.settings.default_location,
+            )
+            or latest
+        )
         age = _age_seconds(last_success, self._now())
-        capabilities = _metadata_capabilities(metadata.get(LAST_MODEL_CAPABILITIES))
+        capabilities = _metadata_capabilities(
+            _scoped_metadata(
+                metadata,
+                LAST_MODEL_CAPABILITIES,
+                location_name=scoped_location,
+                default_location=self.settings.default_location,
+            )
+        )
         full_models = sum(
             1
             for item in capabilities
@@ -479,7 +649,7 @@ class DashboardService:
         return {
             "version": __version__,
             "timezone": self.settings.timezone,
-            "location": location_name or self.settings.default_location,
+            "location": scoped_location,
             "arrival_after": self.settings.default_arrival_after.strftime("%H:%M"),
             "hours": {
                 "start": self.settings.hours[0],
@@ -489,9 +659,26 @@ class DashboardService:
             "full_models": full_models,
             "partial_models": partial_models,
             "last_successful_snapshot": last_success,
-            "last_refresh_attempt": metadata.get(LAST_REFRESH_ATTEMPT),
-            "last_refresh_status": metadata.get(LAST_REFRESH_STATUS, "unknown"),
-            "last_refresh_error": metadata.get(LAST_REFRESH_ERROR) or None,
+            "last_refresh_attempt": _scoped_metadata(
+                metadata,
+                LAST_REFRESH_ATTEMPT,
+                location_name=scoped_location,
+                default_location=self.settings.default_location,
+            ),
+            "last_refresh_status": _scoped_metadata(
+                metadata,
+                LAST_REFRESH_STATUS,
+                location_name=scoped_location,
+                default_location=self.settings.default_location,
+            )
+            or "unknown",
+            "last_refresh_error": _scoped_metadata(
+                metadata,
+                LAST_REFRESH_ERROR,
+                location_name=scoped_location,
+                default_location=self.settings.default_location,
+            )
+            or None,
             "data_age_seconds": age,
             "snapshot_count": store.snapshot_count(),
             "freshness": _freshness(age),
