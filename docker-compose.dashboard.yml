@@ -44,6 +44,8 @@ services:
       - ./data:/app/data
     networks:
       - npm_default
+    healthcheck:
+      disable: true
 
 networks:
   npm_default:

@@ -7,6 +7,7 @@ __pycache__/
 *.sqlite
 *.sqlite-shm
 *.sqlite-wal
+data/refresh.lock
 .ruff_cache/
 data/raw/*.json
 !data/raw/.gitkeep
