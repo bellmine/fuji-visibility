@@ -130,6 +130,10 @@ refresh path, and the scheduled worker can be started locally with:
 uv run python -m fuji_visibility.snapshot_worker
 ```
 
+The dashboard's common-hours selector defaults to `08:00–17:00`. Override this
+presentation default with `FUJI_DEFAULT_START_HOUR` and
+`FUJI_DEFAULT_END_HOUR` when running a local or deployed instance.
+
 For the private VPS deployment, use the supplied Docker Compose file and the
 manual Nginx Proxy Manager steps in [README_DEPLOY.md](README_DEPLOY.md). The
 compose file joins the existing `npm_default` network and exposes no host port.

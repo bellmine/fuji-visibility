@@ -30,8 +30,8 @@ def _settings(tmp_path: Path, *, models: tuple[str, ...] = MODELS) -> DashboardS
     data_dir = tmp_path / "data"
     return DashboardSettings(
         default_location="kawaguchiko",
-        default_start_hour=5,
-        default_end_hour=12,
+        default_start_hour=8,
+        default_end_hour=17,
         database_path=data_dir / "forecast.sqlite",
         raw_data_dir=data_dir / "raw",
         refresh_lock_path=data_dir / "refresh.lock",
@@ -135,6 +135,9 @@ def test_homepage_and_json_apis_use_stored_consensus(tmp_path: Path) -> None:
     assert 'data-hours-preset' in page.text
     assert 'value="13-18"' in page.text
 
+    default_page = _get(app, "/?dates=2026-08-26&date=2026-08-26")
+    assert '<option value="8-17" selected>白天 · 08:00–17:00</option>' in default_page.text
+
     decision = _get(
         app,
         "/api/decision?dates=2026-08-26&hours=8-9&arrival_after=08:00"
@@ -168,7 +171,7 @@ def test_hour_range_and_arrival_are_presentation_only_for_full_day_snapshots(
     app = create_app(settings)
 
     before = _get(app, "/api/status").json()
-    assert before["hours"] == {"start": 5, "end": 12}
+    assert before["hours"] == {"start": 8, "end": 17}
     assert before["collection_hours"] == {"start": 0, "end": 23}
 
     afternoon = _get(

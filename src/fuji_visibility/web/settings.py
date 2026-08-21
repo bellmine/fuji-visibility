@@ -50,8 +50,8 @@ def _env_float(name: str, default: float) -> float:
 class DashboardSettings:
     timezone: str = TIMEZONE
     default_location: str = DEFAULT_LOCATION
-    default_start_hour: int = 5
-    default_end_hour: int = 12
+    default_start_hour: int = 8
+    default_end_hour: int = 17
     default_arrival_after: time = time(8, 0)
     snapshot_interval_hours: int = 3
     manual_refresh_cooldown_seconds: int = 300
@@ -95,8 +95,8 @@ class DashboardSettings:
         return cls(
             timezone=timezone_name,
             default_location=_env("FUJI_DEFAULT_LOCATION", DEFAULT_LOCATION).lower(),
-            default_start_hour=_env_int("FUJI_DEFAULT_START_HOUR", 5),
-            default_end_hour=_env_int("FUJI_DEFAULT_END_HOUR", 12),
+            default_start_hour=_env_int("FUJI_DEFAULT_START_HOUR", 8),
+            default_end_hour=_env_int("FUJI_DEFAULT_END_HOUR", 17),
             default_arrival_after=arrival_after,
             snapshot_interval_hours=max(1, _env_int("FUJI_SNAPSHOT_INTERVAL_HOURS", 3)),
             manual_refresh_cooldown_seconds=max(

@@ -100,8 +100,10 @@ for the current Open-Meteo endpoints, and no credentials belong in this repo.
 
 Useful overrides include `FUJI_MODELS`, `FUJI_DEFAULT_LOCATION`,
 `FUJI_UPCOMING_DAYS`, `FUJI_RAW_RETENTION_DAYS`, and
-`FUJI_MANUAL_REFRESH_COOLDOWN_SECONDS`. Phase 3.1 decision thresholds can be
-tuned with `FUJI_MIN_PROXY`, `FUJI_MIN_FULL_PROXY_MODELS`, the two
+`FUJI_MANUAL_REFRESH_COOLDOWN_SECONDS`. The dashboard common-hours selector
+defaults to `08:00–17:00`; set `FUJI_DEFAULT_START_HOUR` and
+`FUJI_DEFAULT_END_HOUR` to change that presentation default. Phase 3.1 decision
+thresholds can be tuned with `FUJI_MIN_PROXY`, `FUJI_MIN_FULL_PROXY_MODELS`, the two
 `FUJI_MAX_PROXY_SPREAD_*` values, and the `FUJI_GOOD_*` field thresholds. The
 paths in the compose file are
 forced to `/app/data` so the dashboard and worker always share one database and
