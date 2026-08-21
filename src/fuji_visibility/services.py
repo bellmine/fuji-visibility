@@ -14,9 +14,6 @@ from zoneinfo import ZoneInfo
 from . import __version__
 from .config import (
     CANDIDATE_MODELS,
-    DECISION_MIN_FULL_MODELS,
-    DECISION_MIN_WINDOW_HOURS,
-    GOOD_PROXY_THRESHOLD,
     LOCATION_PRESETS,
     REQUEST_TIMEOUT_SECONDS,
     TIMEZONE,
@@ -146,7 +143,15 @@ def snapshot_all_models(
         snapshot_ids=tuple(snapshot_ids),
         successful_models=tuple(member.model for member in result.members),
         failures=result.failures,
-        capabilities=tuple(member.capability for member in result.members),
+        capabilities=tuple(member.capability for member in result.members)
+        + tuple(
+            ModelCapability(
+                model=failure.model,
+                supported=False,
+                error=failure.reason,
+            )
+            for failure in result.failures
+        ),
     )
 
 
@@ -221,6 +226,10 @@ class DashboardService:
                             latitude=preset.latitude,
                             longitude=preset.longitude,
                             cloud_strategy=self.settings.cloud_strategy,
+                            good_mid_cloud_max=self.settings.good_mid_cloud_max,
+                            good_visibility_min_km=self.settings.good_visibility_min_km,
+                            good_precip_max=self.settings.good_precip_max,
+                            good_humidity_max=self.settings.good_humidity_max,
                         ),
                     )
                 )
@@ -247,9 +256,15 @@ class DashboardService:
             arrival_after=arrival,
             hours=selected_hours,
             stability_by_time=stability_by_time,
-            min_proxy=GOOD_PROXY_THRESHOLD,
-            min_window_hours=DECISION_MIN_WINDOW_HOURS,
-            min_full_models=DECISION_MIN_FULL_MODELS,
+            min_proxy=self.settings.min_proxy,
+            min_window_hours=self.settings.min_window_hours,
+            min_full_proxy_models=self.settings.min_full_proxy_models,
+            max_proxy_spread_strong=self.settings.max_proxy_spread_strong,
+            max_proxy_spread_weak=self.settings.max_proxy_spread_weak,
+            good_mid_cloud_max=self.settings.good_mid_cloud_max,
+            good_visibility_min_km=self.settings.good_visibility_min_km,
+            good_precip_max=self.settings.good_precip_max,
+            good_humidity_max=self.settings.good_humidity_max,
         )
         return DashboardData(
             dates=selected_dates,
@@ -286,6 +301,49 @@ class DashboardService:
             metadata = store.get_metadata_map()
             status = self._status_from_store(store, preset.latitude, preset.longitude)
             capabilities = _metadata_capabilities(metadata.get(LAST_MODEL_CAPABILITIES))
+            if not capabilities or any(
+                "status" not in item or "supports" not in item for item in capabilities
+            ):
+                # Rebuild capability diagnostics from the latest normalized
+                # rows so Phase 2 databases remain readable before the next
+                # network refresh writes new metadata.
+                start = datetime.combine(
+                    to_jst(self._now()).date(), time.min, tzinfo=JST
+                )
+                end = datetime.combine(
+                    to_jst(self._now()).date() + timedelta(days=self.settings.upcoming_days),
+                    time(23, 59, 59),
+                    tzinfo=JST,
+                )
+                stored_rows = store.latest_rows(
+                    canonical_iso(start),
+                    canonical_iso(end),
+                    latitude=preset.latitude,
+                    longitude=preset.longitude,
+                    models=self.settings.configured_models,
+                )
+                rebuilt = build_consensus_from_stored(
+                    stored_rows,
+                    requested_models=self.settings.configured_models,
+                    latitude=preset.latitude,
+                    longitude=preset.longitude,
+                )
+                by_model = {
+                    member.model: _capability_payload(member.capability)
+                    for member in rebuilt.members
+                }
+                for model in self.settings.configured_models:
+                    by_model.setdefault(
+                        model,
+                        _capability_payload(
+                            ModelCapability(
+                                model=model,
+                                supported=False,
+                                error="暂无已保存的预报数据",
+                            )
+                        ),
+                    )
+                capabilities = [by_model[model] for model in self.settings.configured_models]
             failures = _metadata_failures(metadata.get(LAST_REFRESH_FAILURES))
             return {
                 "version": __version__,
@@ -389,7 +447,12 @@ class DashboardService:
         last_success = metadata.get(LAST_REFRESH_SUCCESS) or latest
         age = _age_seconds(last_success, self._now())
         capabilities = _metadata_capabilities(metadata.get(LAST_MODEL_CAPABILITIES))
-        full_models = sum(1 for item in capabilities if item.get("full_forecast_available"))
+        full_models = sum(
+            1
+            for item in capabilities
+            if item.get("status") == "FULL_PROXY" or item.get("full_forecast_available")
+        )
+        partial_models = sum(1 for item in capabilities if item.get("status") == "PARTIAL_USEFUL")
         if not capabilities:
             # Phase 1/2 databases predate app_metadata. Infer the count from
             # the latest usable rows so existing history remains informative.
@@ -411,6 +474,7 @@ class DashboardService:
             for row in legacy_rows:
                 by_model.setdefault(row.model, []).append(row)
             full_models = sum(1 for rows in by_model.values() if _stored_model_is_full(rows))
+            partial_models = max(0, len(by_model) - full_models)
         return {
             "version": __version__,
             "timezone": self.settings.timezone,
@@ -422,6 +486,7 @@ class DashboardService:
             },
             "configured_models": len(self.settings.configured_models),
             "full_models": full_models,
+            "partial_models": partial_models,
             "last_successful_snapshot": last_success,
             "last_refresh_attempt": metadata.get(LAST_REFRESH_ATTEMPT),
             "last_refresh_status": metadata.get(LAST_REFRESH_STATUS, "unknown"),
@@ -435,6 +500,9 @@ class DashboardService:
 def _capability_payload(capability: ModelCapability) -> dict[str, object]:
     return {
         "model": capability.model,
+        "status": capability.status,
+        "supports": capability.supports,
+        "usable_fields": list(capability.usable_fields),
         "supported": capability.supported,
         "variables_available": sorted(capability.variables_available),
         "missing_required": sorted(capability.missing_required),

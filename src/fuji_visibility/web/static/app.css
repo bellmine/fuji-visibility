@@ -74,13 +74,16 @@ h3 { font-size: 1rem; margin-top: 22px; }
 
 .decision-card { padding: 24px; margin-bottom: 36px; border-top: 5px solid var(--accent); }
 .decision-card.status-recommended { border-top-color: var(--good); }
+.decision-card.status-promising { border-top-color: var(--accent); }
 .decision-card.status-no-clear-winner { border-top-color: var(--warn); }
 .decision-card.status-no-qualifying-window { border-top-color: var(--bad); }
+.decision-card.status-insufficient-evidence { border-top-color: var(--muted); }
 .decision-topline { display: flex; align-items: flex-start; justify-content: space-between; gap: 15px; }
 .decision-topline h2 { font-size: clamp(1.55rem, 3vw, 2.2rem); }
 .decision-badge, .mini-badge { display: inline-flex; align-items: center; border-radius: 999px; padding: 5px 9px; font-size: .7rem; font-weight: 850; letter-spacing: .08em; text-transform: uppercase; color: var(--accent-strong); background: #e2f2f7; }
 .status-no-clear-winner .decision-badge { color: var(--warn); background: var(--warn-soft); }
 .status-no-qualifying-window .decision-badge { color: var(--bad); background: var(--bad-soft); }
+.status-insufficient-evidence .decision-badge { color: var(--muted); background: #edf0f2; }
 .decision-summary { max-width: 850px; font-size: 1.05rem; margin: 18px 0; }
 .metric-row { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; margin: 20px 0; }
 .metric-row > div { padding: 12px; background: var(--surface-soft); border-radius: 10px; }
@@ -119,11 +122,26 @@ h3 { font-size: 1rem; margin-top: 22px; }
 .data-table tbody tr:last-child th, .data-table tbody tr:last-child td { border-bottom: 0; }
 .data-table tbody tr.is-qualifying { background: #f2fbf5; }
 .data-table tbody tr.is-unreachable { color: #87929b; background: #fafbfc; }
+.data-table tbody tr.hour-detail-row { background: var(--surface); }
+.hour-detail-row > td { padding-top: 0; }
+.hour-detail-row details { color: var(--muted); font-size: .78rem; }
+.hour-detail-row summary, .hour-card details summary { cursor: pointer; color: var(--accent-strong); font-weight: 700; }
+.hour-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; padding: 12px 0 4px; }
+.hour-detail-grid div { display: grid; gap: 2px; padding: 9px; border-radius: 8px; background: var(--surface-soft); }
+.hour-detail-grid strong { color: var(--ink); font-size: .75rem; }
+.hour-detail-grid span { overflow-wrap: anywhere; }
 .subvalue { display: block; color: var(--muted); font-size: .68rem; font-weight: 400; }
 .label { display: inline-flex; align-items: center; justify-content: center; min-height: 24px; padding: 3px 7px; border-radius: 6px; background: var(--surface-soft); color: var(--muted); font-size: .65rem; font-weight: 850; letter-spacing: .04em; white-space: nowrap; }
 .label-high, .label-medium, .label-good, .label-full { color: var(--good); background: var(--good-soft); }
 .label-low, .label-no-clear-winner { color: var(--warn); background: var(--warn-soft); }
 .label-insufficient-data, .label-muted, .label-partial { color: var(--muted); background: #edf0f2; }
+.label-promising, .label-mixed, .label-field-consensus-weak { color: var(--accent-strong); background: #e2f2f7; }
+.label-model-disagreement, .label-low-score { color: var(--warn); background: var(--warn-soft); }
+.label-insufficient-core-data, .label-before-arrival, .label-unavailable { color: var(--muted); background: #edf0f2; }
+.field-summary-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin: 14px 0; }
+.field-summary-grid div { display: grid; gap: 2px; padding: 9px; background: var(--surface-soft); border-radius: 8px; }
+.field-summary-grid span { color: var(--muted); font-size: .72rem; }
+.field-summary-grid strong { font-size: .82rem; }
 .mobile-hour-list { display: none; }
 
 .two-panel-grid { display: grid; grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr); gap: 16px; margin-top: 34px; }
@@ -206,6 +224,8 @@ h3 { font-size: 1rem; margin-top: 22px; }
   .hour-main-metric { display: flex; align-items: baseline; gap: 7px; margin: 11px 0; }
   .hour-main-metric strong { font-size: 1.65rem; letter-spacing: -.04em; }
   .hour-main-metric span { color: var(--muted); font-size: .75rem; }
+  .hour-card details { margin-top: 12px; font-size: .78rem; }
+  .field-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .trend-controls { grid-template-columns: 1fr 1fr; }
   .trend-controls label:last-child { grid-column: 1 / -1; }
   .detail-grid { grid-template-columns: 1fr; }
@@ -220,6 +240,7 @@ h3 { font-size: 1rem; margin-top: 22px; }
   .decision-topline { display: block; }
   .decision-badge { margin-top: 10px; }
   .metric-row { grid-template-columns: 1fr; }
+  .hour-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .compact-metrics.two-columns { grid-template-columns: 1fr 1fr; }
   .brand { font-size: .9rem; }
   .site-nav { font-size: .78rem; }

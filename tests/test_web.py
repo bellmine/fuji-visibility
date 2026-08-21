@@ -142,6 +142,10 @@ def test_homepage_and_json_apis_use_stored_consensus(tmp_path: Path) -> None:
     assert forecast.status_code == 200
     assert len(forecast.json()["day"]["hours"]) == 2
     assert forecast.json()["day"]["hours"][0]["full_model_count"] == 3
+    hour_payload = forecast.json()["day"]["hours"][0]
+    assert hour_payload["proxy"]["model_count"] == 3
+    assert "mid_cloud" in hour_payload["field_consensus"]
+    assert hour_payload["status_label"] == "符合条件"
 
     trend = _get(app, "/api/trend?date=2026-08-26&hour=09:00&variable=proxy")
     assert trend.status_code == 200
@@ -169,8 +173,8 @@ def test_no_clear_winner_and_no_qualifying_window_are_explicit(tmp_path: Path) -
         "/api/decision?dates=2026-08-28&hours=8-9&arrival_after=08:00"
     )
     assert no_window.status_code == 200
-    assert no_window.json()["status"] == "NO QUALIFYING WINDOW"
-    assert no_window.json()["status_label"] == "暂无符合条件的观景窗口"
+    assert no_window.json()["status"] == "INSUFFICIENT EVIDENCE"
+    assert no_window.json()["status_label"] == "核心数据不足"
 
 
 def test_partial_model_diagnostics_and_health_status(tmp_path: Path) -> None:
@@ -180,9 +184,11 @@ def test_partial_model_diagnostics_and_health_status(tmp_path: Path) -> None:
 
     page = _get(app, "/?dates=2026-08-26&date=2026-08-26")
     assert page.status_code == 200
-    assert "部分数据" in page.text
-    assert "暂无符合条件的观景窗口" in page.text
+    assert "部分可用" in page.text
+    assert "值得关注" in page.text
     assert "目前只有 2 个模型具备完整评分所需数据。" in page.text
+    assert "完整评分" in page.text
+    assert "综合评分" in page.text and "中层云" in page.text and "降水" in page.text
 
     health = _get(app, "/health")
     assert health.status_code == 200
@@ -278,6 +284,16 @@ def test_dashboard_normal_view_uses_chinese_labels_only(tmp_path: Path) -> None:
     assert all(label not in page.text for label in english_ui_labels)
 
 
+def test_static_assets_are_relative_and_served_without_mixed_content(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _seed(settings, dates=("2026-08-26",))
+    app = create_app(settings)
+    page = _get(app, "/?dates=2026-08-26&date=2026-08-26")
+    assert '<link rel="stylesheet" href="./static/app.css">' in page.text
+    assert '<script src="./static/app.js" defer></script>' in page.text
+    assert "http://fuji.wangdi.store/static/" not in page.text
+
+
 def test_decision_state_labels_are_localized(tmp_path: Path) -> None:
     settings = _settings(tmp_path)
     _seed(settings)
@@ -293,5 +309,5 @@ def test_decision_state_labels_are_localized(tmp_path: Path) -> None:
         app,
         "/?dates=2026-08-28&date=2026-08-28&hours=8-9&arrival_after=08:00",
     )
-    assert "暂无符合条件的观景窗口" in no_window.text
-    assert "这不是数据缺失，而是当前预报未同时满足评分、模型数量和一致性要求。" in no_window.text
+    assert "核心数据不足" in no_window.text
+    assert "目前核心数据不足，暂时无法做出可靠判断。" in no_window.text

@@ -21,6 +21,9 @@ from .config import (
     DEFAULT_RAW_DATA_PATH,
     DECISION_MIN_WINDOW_HOURS,
     GOOD_PROXY_THRESHOLD,
+    MAX_PROXY_SPREAD_FOR_STRONG_SUPPORT,
+    MAX_PROXY_SPREAD_FOR_WEAK_SUPPORT,
+    MIN_FULL_PROXY_MODELS,
     LOCATION_PRESETS,
     REQUEST_TIMEOUT_SECONDS,
 )
@@ -314,6 +317,13 @@ def decide(
     models: str | None = typer.Option(None, "--models", help="Comma-separated models or all."),
     min_window_hours: int = typer.Option(DECISION_MIN_WINDOW_HOURS, "--min-window-hours", min=1),
     good_proxy: float = typer.Option(GOOD_PROXY_THRESHOLD, "--good-proxy"),
+    min_full_proxy_models: int = typer.Option(MIN_FULL_PROXY_MODELS, "--min-full-proxy-models", min=1),
+    max_proxy_spread_strong: float = typer.Option(
+        MAX_PROXY_SPREAD_FOR_STRONG_SUPPORT, "--max-proxy-spread-strong", min=0
+    ),
+    max_proxy_spread_weak: float = typer.Option(
+        MAX_PROXY_SPREAD_FOR_WEAK_SUPPORT, "--max-proxy-spread-weak", min=0
+    ),
     cloud_strategy: str = typer.Option("mid", "--cloud-strategy"),
     json_output: bool = typer.Option(False, "--json", help="Emit machine-readable JSON."),
 ) -> None:
@@ -359,6 +369,9 @@ def decide(
             stability_by_time=stability_by_time,
             min_proxy=good_proxy,
             min_window_hours=min_window_hours,
+            min_full_proxy_models=min_full_proxy_models,
+            max_proxy_spread_strong=max_proxy_spread_strong,
+            max_proxy_spread_weak=max_proxy_spread_weak,
         )
         if json_output:
             typer.echo(json.dumps(decision_payload(decision_result), ensure_ascii=False, indent=2))

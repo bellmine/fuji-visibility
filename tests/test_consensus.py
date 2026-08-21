@@ -59,6 +59,9 @@ def test_consensus_median_range_and_outlier(make_hour):
     hour = result.hours[0]
     assert hour.model_count == 5
     assert hour.full_model_count == 5
+    assert hour.full_proxy_model_count == 5
+    assert len(hour.proxy_values) == 5
+    assert hour.proxy_spread == hour.proxy_max - hour.proxy_min
     assert hour.proxy_median is not None
     assert hour.proxy_min is not None and hour.proxy_max is not None
     assert "model_4" in hour.outlier_models
@@ -84,6 +87,10 @@ def test_partial_model_contributes_cloud_but_not_full_proxy(make_hour):
     assert hour.full_model_count == 4
     assert hour.partial_model_count == 1
     assert hour.mid_cloud_median == 5
+    assert hour.mid_cloud_model_count == 5
+    assert hour.visibility_model_count == 4
+    assert hour.field_consensus["mid_cloud"].support == "STRONG_SUPPORT"
+    assert hour.field_consensus["visibility"].model_count == 4
 
 
 def test_capability_records_missing_fields_and_cache():

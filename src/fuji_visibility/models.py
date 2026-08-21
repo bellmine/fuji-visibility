@@ -93,6 +93,37 @@ class ModelCapability(BaseModel):
     def full_forecast_available(self) -> bool:
         return not self.missing_required and "visibility" in self.variables_available
 
+    @property
+    def supports(self) -> dict[str, bool]:
+        """Return field-level capabilities used by the dashboard diagnostics.
+
+        Capability is derived from the variables actually returned by the
+        provider.  This intentionally does not encode assumptions about a
+        model name because Open-Meteo's model coverage can change over time.
+        """
+
+        return {
+            "proxy": self.full_forecast_available,
+            "mid_cloud": "cloud_cover_mid" in self.variables_available,
+            "visibility": "visibility" in self.variables_available,
+            "precipitation": "precipitation_probability" in self.variables_available,
+            "humidity": "relative_humidity_2m" in self.variables_available,
+        }
+
+    @property
+    def status(self) -> str:
+        """Classify the runtime capability without losing partial evidence."""
+
+        if not self.supported or not any(self.supports.values()):
+            return "UNAVAILABLE"
+        if self.supports["proxy"]:
+            return "FULL_PROXY"
+        return "PARTIAL_USEFUL"
+
+    @property
+    def usable_fields(self) -> tuple[str, ...]:
+        return tuple(field for field, available in self.supports.items() if available)
+
 
 class FingerprintObservation(BaseModel):
     valid_time: datetime

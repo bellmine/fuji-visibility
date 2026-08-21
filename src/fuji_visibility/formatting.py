@@ -245,6 +245,19 @@ def render_decision(
         console.print("[bold yellow]NO CLEAR WINNER[/bold yellow]")
         for reason in result.rationale:
             console.print(f"- {reason}")
+    elif result.winner is None and result.promising_winner is not None:
+        console.print(
+            f"[bold cyan]PROMISING: {result.promising_winner.date.strftime('%a %Y-%m-%d').upper()}[/bold cyan]"
+        )
+        _render_decision_window(
+            console,
+            result.promising_winner.best_promising_window,
+            heading="Promising reachable window",
+            good_proxy=result.min_proxy,
+        )
+        console.print("Why this window is worth watching:")
+        for reason in result.rationale:
+            console.print(f"- {reason}")
     elif result.winner is not None and result.winner.best_window is not None:
         winner = result.winner
         window = winner.best_window
@@ -258,6 +271,10 @@ def render_decision(
         console.print("Why this day wins:")
         for reason in result.rationale:
             console.print(f"- {reason}")
+    elif result.insufficient_evidence:
+        console.print("[bold yellow]INSUFFICIENT EVIDENCE[/bold yellow]")
+        for reason in result.rationale:
+            console.print(f"- {reason}")
     else:
         console.print("[bold yellow]NO QUALIFYING WINDOW[/bold yellow]")
         for reason in result.rationale:
@@ -265,29 +282,39 @@ def render_decision(
     for day in result.days:
         console.print()
         console.print(f"[bold]{day.date.strftime('%a %Y-%m-%d').upper()}[/bold]")
-        if day.best_window is None:
-            console.print("No reachable qualifying window.")
+        window = day.best_window or day.best_promising_window
+        if window is None:
+            console.print(
+                "Not enough core forecast evidence."
+                if day.hours and all(item.status == "INSUFFICIENT_CORE_DATA" for item in day.hours)
+                else "No reachable qualifying window."
+            )
             continue
         _render_decision_window(
             console,
-            day.best_window,
-            heading="Best reachable window",
+            window,
+            heading=("Best reachable window" if day.best_window is not None else "Promising reachable window"),
             good_proxy=result.min_proxy,
         )
 
 
 def _render_decision_window(
     console: Console,
-    window: DecisionWindow,
+    window: DecisionWindow | None,
     *,
     heading: str,
     good_proxy: float,
 ) -> None:
+    if window is None:
+        console.print("No window details are available.")
+        return
     console.print(f"{heading}: {format_time_window(window.start, window.end)}")
     console.print(
         f"Peak: {to_jst(window.peak.consensus.valid_time):%H:%M} | "
         f"Proxy median: {window.peak_proxy:.0f} | "
         f"Consensus: {window.consensus_label} | "
+        f"Status: {window.status} | "
+        f"Confidence: {window.confidence} | "
         f"Forecast stability: {window.stability_confidence} | "
         f"Trend: {window.trend_label}"
     )
@@ -302,6 +329,10 @@ def _render_decision_window(
         f"visibility median {fmt(window.peak.consensus.visibility_median_km, 1, ' km')}, "
         f"rain median {fmt(window.peak.consensus.precip_median, 0, '%')}"
     )
+    for field_name, evidence in window.peak.consensus.field_consensus.items():
+        console.print(
+            f"{field_name}: {evidence.support} ({evidence.good_votes}/{evidence.model_count} good)"
+        )
     if window.mid_cloud_max is not None and window.mid_cloud_max > (window.peak.consensus.mid_cloud_median or 0):
         console.print(f"Main risk: mid-level cloud reaches {window.mid_cloud_max:.0f}% within the window.")
     elif window.visibility_min is not None and window.visibility_min < (window.peak.consensus.visibility_median_km or float('inf')):

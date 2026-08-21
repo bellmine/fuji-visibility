@@ -106,9 +106,10 @@ def register_routes(app: FastAPI, templates: Jinja2Templates) -> None:
                     },
                     "days": [],
                     "decision": {
-                        "status": "NO QUALIFYING WINDOW",
-                        "status_label": label(DECISION_LABELS, "NO QUALIFYING WINDOW"),
+                        "status": "INSUFFICIENT EVIDENCE",
+                        "status_label": label(DECISION_LABELS, "INSUFFICIENT EVIDENCE"),
                         "winner_date": None,
+                        "promising_winner_date": None,
                         "days": [],
                         "rationale": [],
                     },

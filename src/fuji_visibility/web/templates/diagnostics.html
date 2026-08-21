@@ -30,10 +30,10 @@
 </section>
 
 <section class="card panel">
-  <div class="section-heading compact"><div><p class="eyebrow">模型能力</p><h2>最近一次模型数据覆盖</h2></div><span class="muted">完整数据 = 必需输入和能见度均具备</span></div>
+  <div class="section-heading compact"><div><p class="eyebrow">模型能力</p><h2>最近一次模型数据覆盖</h2></div><span class="muted">能力按运行时实际返回字段判断</span></div>
   {% if diagnostics.capabilities %}
-    <div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>状态</th><th>可用变量</th><th>缺失必需字段</th><th>错误</th></tr></thead><tbody>
-    {% for item in diagnostics.capabilities %}<tr><th>{{ item.model }}</th><td><span class="label label-{{ 'full' if item.full_forecast_available else 'partial' }}">{{ '完整' if item.full_forecast_available else '部分数据' }}</span></td><td>{{ item.variables_available|join('、') }}</td><td>{{ item.missing_required|join('、') if item.missing_required else '—' }}</td><td>{{ item.error or '—' }}</td></tr>{% endfor %}
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>状态</th><th>综合评分</th><th>中层云</th><th>能见度</th><th>降水</th><th>湿度</th><th>缺失字段 / 异常</th></tr></thead><tbody>
+    {% for item in diagnostics.capabilities %}<tr><th>{{ item.model }}</th><td><span class="label label-{{ item.status|lower|replace('_', '-') }}">{{ {'FULL_PROXY': '完整评分', 'PARTIAL_USEFUL': '部分可用', 'UNAVAILABLE': '不可用'}.get(item.status, item.status) }}</span></td><td>{{ '有' if item.supports.proxy else '—' }}</td><td>{{ '有' if item.supports.mid_cloud else '—' }}</td><td>{{ '有' if item.supports.visibility else '—' }}</td><td>{{ '有' if item.supports.precipitation else '—' }}</td><td>{{ '有' if item.supports.humidity else '—' }}</td><td>{{ item.error or (item.missing_required|join('、') if item.missing_required else '—') }}</td></tr>{% endfor %}
     </tbody></table></div>
   {% else %}<div class="empty-state">暂无模型能力信息。运行一次快照刷新后会填充此表。</div>{% endif %}
 </section>

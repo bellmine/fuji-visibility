@@ -12,6 +12,14 @@ from ..config import (
     DEFAULT_DATABASE_PATH,
     DEFAULT_LOCATION,
     DEFAULT_RAW_DATA_PATH,
+    GOOD_HUMIDITY_MAX,
+    GOOD_MID_CLOUD_MAX,
+    GOOD_PRECIP_MAX,
+    GOOD_VISIBILITY_MIN_KM,
+    MAX_PROXY_SPREAD_FOR_STRONG_SUPPORT,
+    MAX_PROXY_SPREAD_FOR_WEAK_SUPPORT,
+    MIN_FULL_PROXY_MODELS,
+    MIN_PROXY,
     TIMEZONE,
 )
 from ..time_utils import parse_clock
@@ -27,6 +35,13 @@ def _env_int(name: str, default: int) -> int:
         return int(_env(name, str(default)))
     except ValueError as exc:
         raise ValueError(f"{name} must be an integer") from exc
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(_env(name, str(default)))
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
 
 
 @dataclass(frozen=True)
@@ -47,6 +62,15 @@ class DashboardSettings:
     raw_retention_days: int = 30
     configured_models: tuple[str, ...] = CANDIDATE_MODELS
     cloud_strategy: str = "mid"
+    min_proxy: float = MIN_PROXY
+    min_full_proxy_models: int = MIN_FULL_PROXY_MODELS
+    max_proxy_spread_strong: float = MAX_PROXY_SPREAD_FOR_STRONG_SUPPORT
+    max_proxy_spread_weak: float = MAX_PROXY_SPREAD_FOR_WEAK_SUPPORT
+    good_mid_cloud_max: float = GOOD_MID_CLOUD_MAX
+    good_visibility_min_km: float = GOOD_VISIBILITY_MIN_KM
+    good_precip_max: float = GOOD_PRECIP_MAX
+    good_humidity_max: float = GOOD_HUMIDITY_MAX
+    min_window_hours: int = 2
 
     @classmethod
     def from_env(cls) -> "DashboardSettings":
@@ -84,6 +108,23 @@ class DashboardSettings:
             raw_retention_days=max(0, _env_int("FUJI_RAW_RETENTION_DAYS", 30)),
             configured_models=configured_models,
             cloud_strategy=_env("FUJI_CLOUD_STRATEGY", "mid"),
+            min_proxy=_env_float("FUJI_MIN_PROXY", MIN_PROXY),
+            min_full_proxy_models=max(
+                1, _env_int("FUJI_MIN_FULL_PROXY_MODELS", MIN_FULL_PROXY_MODELS)
+            ),
+            max_proxy_spread_strong=_env_float(
+                "FUJI_MAX_PROXY_SPREAD_STRONG", MAX_PROXY_SPREAD_FOR_STRONG_SUPPORT
+            ),
+            max_proxy_spread_weak=_env_float(
+                "FUJI_MAX_PROXY_SPREAD_WEAK", MAX_PROXY_SPREAD_FOR_WEAK_SUPPORT
+            ),
+            good_mid_cloud_max=_env_float("FUJI_GOOD_MID_CLOUD_MAX", GOOD_MID_CLOUD_MAX),
+            good_visibility_min_km=_env_float(
+                "FUJI_GOOD_VISIBILITY_MIN_KM", GOOD_VISIBILITY_MIN_KM
+            ),
+            good_precip_max=_env_float("FUJI_GOOD_PRECIP_MAX", GOOD_PRECIP_MAX),
+            good_humidity_max=_env_float("FUJI_GOOD_HUMIDITY_MAX", GOOD_HUMIDITY_MAX),
+            min_window_hours=max(1, _env_int("FUJI_MIN_WINDOW_HOURS", 2)),
         )
 
     @property

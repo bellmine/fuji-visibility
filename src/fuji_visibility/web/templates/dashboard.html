@@ -67,19 +67,31 @@
     <span class="decision-badge">{{ decision.status_label }}</span>
   </div>
   {% set winner = namespace(window=None) %}
+  {% set promising = namespace(window=None) %}
   {% for candidate in decision.days %}
     {% if candidate.date == decision.winner_date %}{% set winner.window = candidate.best_window %}{% endif %}
+    {% if candidate.date == decision.promising_winner_date %}{% set promising.window = candidate.best_promising_window %}{% endif %}
   {% endfor %}
   {% if decision.winner_date and winner.window %}
     <p class="decision-summary"><strong>{{ decision.winner_date_label }}</strong> 当前最容易看到富士山，可到达观景窗口为 <strong>{{ winner.window.start|local_datetime }} – {{ winner.window.end|local_datetime }}</strong>，综合评分峰值为 <strong>{{ winner.window.peak_proxy_median|number(0) }}</strong>。</p>
     <div class="metric-row">
       <div><span>可到达窗口</span><strong>{{ winner.window.start|local_datetime }} – {{ winner.window.end|local_datetime }}</strong></div>
       <div><span>模型一致性</span><strong>{{ winner.window.consensus_label }}</strong></div>
-      <div><span>稳定性</span><strong>{{ winner.window.stability_confidence_label }}</strong></div>
+      <div><span>置信度</span><strong>{{ winner.window.confidence_label }}</strong></div>
       <div><span>趋势</span><strong>{{ winner.window.trend_label }}</strong></div>
+    </div>
+  {% elif decision.status == "PROMISING" and decision.promising_winner_date and promising.window %}
+    <p class="decision-summary"><strong>暂无正式推荐。</strong> {{ decision.promising_winner_date_label }} 有一个值得关注的可到达时段：<strong>{{ promising.window.start|local_datetime }} – {{ promising.window.end|local_datetime }}</strong>，综合评分峰值为 <strong>{{ promising.window.peak_proxy_median|number(0) }}</strong>。</p>
+    <div class="metric-row">
+      <div><span>值得关注的窗口</span><strong>{{ promising.window.start|local_datetime }} – {{ promising.window.end|local_datetime }}</strong></div>
+      <div><span>模型一致性</span><strong>{{ promising.window.consensus_label }}</strong></div>
+      <div><span>置信度</span><strong>{{ promising.window.confidence_label }}</strong></div>
+      <div><span>趋势</span><strong>{{ promising.window.trend_label }}</strong></div>
     </div>
   {% elif decision.status == "NO CLEAR WINNER" %}
     <p class="decision-summary">多个日期均符合条件，但当前证据差距太小，暂时无法选出明显优选。建议保持计划弹性，并在下一轮模型更新后再次查看。</p>
+  {% elif decision.status == "INSUFFICIENT EVIDENCE" %}
+    <p class="decision-summary">目前核心数据不足，暂时无法做出可靠判断。请先刷新预报，或等待更多模型数据返回。</p>
   {% else %}
     <p class="decision-summary">目前没有符合条件的可到达观景窗口。<br>这不是数据缺失，而是当前预报未同时满足评分、模型数量和一致性要求。</p>
   {% endif %}
@@ -95,18 +107,19 @@
   </div>
   <div class="day-grid">
     {% for day in payload.days %}
-      {% set window = day.best_window %}
+      {% set window = day.best_window or day.best_promising_window %}
       <a class="day-card{% if day.date == payload.selected_date %} is-selected{% endif %}" href="/?date={{ day.date }}{% if location.name %}&location={{ location.name }}{% endif %}">
-        <div class="day-card-head"><strong>{{ day.label }}</strong>{% if day.date == decision.winner_date %}<span class="mini-badge">推荐</span>{% endif %}</div>
+        <div class="day-card-head"><strong>{{ day.label }}</strong>{% if day.date == decision.winner_date %}<span class="mini-badge">推荐</span>{% elif day.date == decision.promising_winner_date %}<span class="mini-badge">值得关注</span>{% endif %}</div>
         {% if window %}
           <div class="day-score"><span>{{ window.peak_proxy_median|number(0) }}</span><small>综合评分峰值</small></div>
           <dl class="compact-metrics">
             <div><dt>窗口</dt><dd>{{ window.start|local_datetime }}–{{ window.end|local_datetime }}</dd></div>
-            <div><dt>模型一致性</dt><dd>{{ window.consensus_label }}</dd></div>
+            <div><dt>状态</dt><dd>{{ window.status_label }}</dd></div>
+            <div><dt>置信度</dt><dd>{{ window.confidence_label }}</dd></div>
             <div><dt>趋势</dt><dd>{{ window.trend_label }}</dd></div>
           </dl>
         {% else %}
-          <p class="empty-card">暂无符合条件的观景窗口</p>
+          <p class="empty-card">{{ day.status_label }}</p>
           <span class="muted">{{ day.hours|length }} 个已保存的逐小时数据点</span>
         {% endif %}
       </a>
@@ -124,28 +137,30 @@
   {% if selected_day and selected_day.hours %}
     <div class="table-wrap">
       <table class="data-table hourly-table">
-        <thead><tr><th scope="col">时间</th><th scope="col">综合评分</th><th scope="col">模型共识</th><th scope="col">中层云量</th><th scope="col">能见度</th><th scope="col">模型</th><th scope="col">可到达性</th></tr></thead>
+        <thead><tr><th scope="col">时间</th><th scope="col">综合评分</th><th scope="col">状态</th><th scope="col">中层云共识</th><th scope="col">降水共识</th><th scope="col">能见度</th><th scope="col">完整评分模型</th></tr></thead>
         <tbody>
         {% for hour in selected_day.hours %}
-          <tr class="{% if not hour.reachable %}is-unreachable{% elif hour.qualifies %}is-qualifying{% endif %}">
+          <tr class="{% if hour.status == 'BEFORE_ARRIVAL' %}is-unreachable{% elif hour.status in ['QUALIFIES', 'PROMISING'] %}is-qualifying{% endif %}">
             <th scope="row">{{ hour.local_time }}</th>
             <td><strong>{{ hour.proxy_median|number(0) }}</strong><small class="subvalue">{{ hour.proxy_min|number(0) }}–{{ hour.proxy_max|number(0) }}</small></td>
-            <td><span class="label label-{{ hour.consensus|lower|replace('_', '-') }}">{{ hour.consensus_label }}</span></td>
-            <td>{{ hour.mid_cloud_median|number(0) }}%</td>
-            <td>{{ hour.visibility_median_km|kilometers(1) }}</td>
-            <td>{{ hour.coverage_label }}</td>
-            <td>{% if not hour.reachable %}<span class="label label-muted">到达前</span>{% elif hour.qualifies %}<span class="label label-good">可到达</span>{% else %}<span class="label label-muted">不符合条件</span>{% endif %}</td>
+            <td><span class="label label-{{ hour.status|lower|replace('_', '-') }}">{{ hour.status_label }}</span><small class="subvalue">置信度：{{ hour.confidence_label }}</small></td>
+            <td>{% set mid = hour.field_consensus.get('mid_cloud') %}{% if mid %}<span class="label">{{ mid.support_label }}</span><small class="subvalue">{{ mid.model_count }} 个模型 · {{ mid.median|number(0) }}%</small>{% else %}—{% endif %}</td>
+            <td>{% set precip = hour.field_consensus.get('precipitation') %}{% if precip %}<span class="label">{{ precip.support_label }}</span><small class="subvalue">{{ precip.model_count }} 个模型 · {{ precip.median|number(0) }}%</small>{% else %}—{% endif %}</td>
+            <td>{{ hour.visibility_median_km|kilometers(1) }}<small class="subvalue">{{ hour.visibility_model_count }} 个模型</small></td>
+            <td>{{ hour.full_proxy_model_count }}</td>
           </tr>
+          <tr class="hour-detail-row"><td colspan="7"><details><summary>查看 {{ hour.local_time }} 的证据明细</summary><div class="hour-detail-grid"><div><strong>综合评分</strong><span>{{ hour.proxy_median|number(0) }} 分 · {{ hour.proxy.agreement_label }}</span><span>{{ hour.full_proxy_model_count }} 个完整评分来源</span></div><div><strong>能见度</strong><span>{{ hour.visibility_median_km|kilometers(1) }} · {{ hour.visibility_model_count }} 个模型</span><span>{{ hour.field_consensus.visibility.support_label if hour.field_consensus.visibility else '数据不足' }}</span></div><div><strong>湿度</strong><span>{{ hour.field_consensus.humidity.median|number(0) }}% · {{ hour.field_consensus.humidity.support_label if hour.field_consensus.humidity else '数据不足' }}</span></div><div><strong>结论</strong><span>{{ hour.status_label }} · 置信度：{{ hour.confidence_label }}</span><span>{{ hour.decision_reasons_label|join('、') if hour.decision_reasons_label else '暂无更多判断说明' }}</span></div></div></details></td></tr>
         {% endfor %}
         </tbody>
       </table>
     </div>
     <div class="mobile-hour-list">
       {% for hour in selected_day.hours %}
-        <article class="hour-card{% if hour.qualifies %} is-qualifying{% elif not hour.reachable %} is-unreachable{% endif %}">
-          <div class="hour-card-head"><strong>{{ hour.local_time }}</strong><span class="label label-{{ hour.consensus|lower|replace('_', '-') }}">{{ hour.consensus_label }}</span></div>
+        <article class="hour-card{% if hour.status in ['QUALIFIES', 'PROMISING'] %} is-qualifying{% elif hour.status == 'BEFORE_ARRIVAL' %} is-unreachable{% endif %}">
+          <div class="hour-card-head"><strong>{{ hour.local_time }}</strong><span class="label label-{{ hour.status|lower|replace('_', '-') }}">{{ hour.status_label }}</span></div>
           <div class="hour-main-metric"><strong>{{ hour.proxy_median|number(0) }}</strong><span>综合评分中位数</span></div>
-          <dl class="compact-metrics two-columns"><div><dt>中层云量</dt><dd>{{ hour.mid_cloud_median|number(0) }}%</dd></div><div><dt>能见度</dt><dd>{{ hour.visibility_median_km|kilometers(1) }}</dd></div><div><dt>模型</dt><dd>{{ hour.coverage_label }}</dd></div><div><dt>可到达性</dt><dd>{% if not hour.reachable %}到达前{% elif hour.qualifies %}可到达{% else %}不符合条件{% endif %}</dd></div></dl>
+          <dl class="compact-metrics two-columns"><div><dt>中层云共识</dt><dd>{{ hour.field_consensus.mid_cloud.support_label if hour.field_consensus.mid_cloud else '数据不足' }}</dd></div><div><dt>降水共识</dt><dd>{{ hour.field_consensus.precipitation.support_label if hour.field_consensus.precipitation else '数据不足' }}</dd></div><div><dt>能见度</dt><dd>{{ hour.visibility_median_km|kilometers(1) }}</dd></div><div><dt>完整评分模型</dt><dd>{{ hour.full_proxy_model_count }}</dd></div></dl>
+          <details><summary>查看证据明细</summary><p class="muted">{{ hour.decision_reasons_label|join('、') if hour.decision_reasons_label else '暂无更多判断说明' }}</p><p>置信度：{{ hour.confidence_label }} · {{ hour.proxy.agreement_label }}</p></details>
         </article>
       {% endfor %}
     </div>
@@ -159,10 +174,16 @@
     <div class="section-heading compact"><div><p class="eyebrow">模型一致性</p><h2 id="consensus-heading">模型共识</h2></div></div>
     {% if selected_day and selected_day.hours %}
       {% set focus_hour = selected_day.hours[0] %}
-      <div class="focus-summary"><span class="focus-time">{{ focus_hour.local_time }}</span><span class="label label-{{ focus_hour.consensus|lower|replace('_', '-') }}">{{ focus_hour.consensus_label }}</span><strong>{{ focus_hour.proxy_median|number(0) }} 分</strong></div>
-      <p class="muted">目前有 {{ focus_hour.models_good_proxy }} 个模型达到综合评分阈值。离群模型：{{ focus_hour.outlier_models|join('、') if focus_hour.outlier_models else '无' }}。</p>
+      <div class="focus-summary"><span class="focus-time">{{ focus_hour.local_time }}</span><span class="label label-{{ focus_hour.status|lower|replace('_', '-') }}">{{ focus_hour.status_label }}</span><strong>{{ focus_hour.proxy_median|number(0) }} 分</strong></div>
+      <p class="muted">{{ focus_hour.full_proxy_model_count }} 个完整评分来源，{{ focus_hour.proxy.agreement_label }}。离群模型：{{ focus_hour.outlier_models|join('、') if focus_hour.outlier_models else '无' }}。</p>
+      <div class="field-summary-grid">
+        <div><span>中层云</span><strong>{{ focus_hour.field_consensus.mid_cloud.support_label if focus_hour.field_consensus.mid_cloud else '数据不足' }}</strong></div>
+        <div><span>降水</span><strong>{{ focus_hour.field_consensus.precipitation.support_label if focus_hour.field_consensus.precipitation else '数据不足' }}</strong></div>
+        <div><span>能见度</span><strong>{{ focus_hour.visibility_median_km|kilometers(1) }}</strong></div>
+        <div><span>湿度</span><strong>{{ focus_hour.field_consensus.humidity.support_label if focus_hour.field_consensus.humidity else '数据不足' }}</strong></div>
+      </div>
       <div class="vote-list">
-        {% for model in focus_hour.models %}<div class="vote-row"><span>{{ model.model }}</span><span class="vote-score">{{ model.proxy|number(0) }}</span><span class="label label-{{ 'full' if model.full_model else 'partial' }}">{{ '完整' if model.full_model else '部分数据' }}</span></div>{% endfor %}
+        {% for model in focus_hour.models %}<div class="vote-row"><span>{{ model.model }}</span><span class="vote-score">{{ model.proxy|number(0) }}</span><span class="label label-{{ model.capability_status|lower|replace('_', '-') }}">{{ model.capability_status_label }}</span></div>{% endfor %}
       </div>
     {% else %}<div class="empty-state">暂无可显示的模型共识数据。</div>{% endif %}
   </section>
@@ -183,8 +204,8 @@
   <details open>
     <summary><span><p class="eyebrow">诊断</p><h2 id="model-diagnostics-heading">模型数据覆盖与异常</h2></span><span class="muted">选定日期 {{ selected_day.models|length if selected_day else 0 }} 个模型</span></summary>
     {% if selected_day and selected_day.models %}
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>状态</th><th>支持</th><th>缺失必需字段</th><th>错误</th></tr></thead><tbody>
-      {% for model in selected_day.models %}<tr><th>{{ model.model }}</th><td><span class="label label-{{ model.status|lower }}">{{ model.status_label }}</span></td><td>{{ '是' if model.supported else '否' }}</td><td>{{ model.missing_required|join('、') if model.missing_required else '—' }}</td><td>{{ model.error or '—' }}</td></tr>{% endfor %}
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>状态</th><th>综合评分</th><th>中层云</th><th>能见度</th><th>降水</th><th>湿度</th><th>异常</th></tr></thead><tbody>
+      {% for model in selected_day.models %}<tr><th>{{ model.model }}</th><td><span class="label label-{{ model.status|lower|replace('_', '-') }}">{{ model.status_label }}</span></td><td>{{ '有' if model.supports.proxy else '—' }}</td><td>{{ '有' if model.supports.mid_cloud else '—' }}</td><td>{{ '有' if model.supports.visibility else '—' }}</td><td>{{ '有' if model.supports.precipitation else '—' }}</td><td>{{ '有' if model.supports.humidity else '—' }}</td><td>{{ model.error or (model.missing_required|join('、') if model.missing_required else '—') }}</td></tr>{% endfor %}
       </tbody></table></div>
     {% endif %}
     {% if selected_day and selected_day.failures %}<h3>刷新异常</h3><ul class="failure-list">{% for failure in selected_day.failures %}<li><strong>{{ failure.model }}</strong> — {{ failure.reason }}</li>{% endfor %}</ul>{% endif %}

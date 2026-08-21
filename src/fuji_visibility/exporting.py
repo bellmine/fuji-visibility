@@ -113,9 +113,20 @@ CONSENSUS_EXPORT_FIELDS = (
     "consensus_label",
     "model_count",
     "full_model_count",
+    "full_proxy_model_count",
     "proxy_min",
     "proxy_max",
+    "proxy_spread",
     "proxy_stddev",
+    "proxy_agreement",
+    "mid_cloud_model_count",
+    "mid_cloud_support",
+    "visibility_model_count",
+    "visibility_support",
+    "precip_model_count",
+    "precip_support",
+    "humidity_model_count",
+    "humidity_support",
     "outlier",
 )
 
@@ -154,9 +165,20 @@ def export_consensus_text(
                     "consensus_label": hour.consensus_label,
                     "model_count": hour.model_count,
                     "full_model_count": hour.full_model_count,
+                    "full_proxy_model_count": hour.full_proxy_model_count,
                     "proxy_min": hour.proxy_min,
                     "proxy_max": hour.proxy_max,
+                    "proxy_spread": hour.proxy_spread,
                     "proxy_stddev": hour.proxy_stddev,
+                    "proxy_agreement": hour.proxy_agreement,
+                    "mid_cloud_model_count": hour.mid_cloud_model_count,
+                    "mid_cloud_support": _field_support(hour, "mid_cloud"),
+                    "visibility_model_count": hour.visibility_model_count,
+                    "visibility_support": _field_support(hour, "visibility"),
+                    "precip_model_count": hour.precip_model_count,
+                    "precip_support": _field_support(hour, "precipitation"),
+                    "humidity_model_count": hour.humidity_model_count,
+                    "humidity_support": _field_support(hour, "humidity"),
                     "outlier": member.outlier,
                 }
                 rows.append(member_row)
@@ -173,9 +195,20 @@ def export_consensus_text(
                 "consensus_label": hour.consensus_label,
                 "model_count": hour.model_count,
                 "full_model_count": hour.full_model_count,
+                "full_proxy_model_count": hour.full_proxy_model_count,
                 "proxy_min": hour.proxy_min,
                 "proxy_max": hour.proxy_max,
+                "proxy_spread": hour.proxy_spread,
                 "proxy_stddev": hour.proxy_stddev,
+                "proxy_agreement": hour.proxy_agreement,
+                "mid_cloud_model_count": hour.mid_cloud_model_count,
+                "mid_cloud_support": _field_support(hour, "mid_cloud"),
+                "visibility_model_count": hour.visibility_model_count,
+                "visibility_support": _field_support(hour, "visibility"),
+                "precip_model_count": hour.precip_model_count,
+                "precip_support": _field_support(hour, "precipitation"),
+                "humidity_model_count": hour.humidity_model_count,
+                "humidity_support": _field_support(hour, "humidity"),
                 "outlier": False,
             }
             rows.append(aggregate_row)
@@ -188,3 +221,8 @@ def export_consensus_text(
         writer.writerows(rows)
         return output.getvalue()
     return json.dumps({"days": json_days}, ensure_ascii=False, indent=2) + "\n"
+
+
+def _field_support(hour, name: str) -> str:
+    evidence = hour.field_consensus.get(name)
+    return "" if evidence is None else evidence.support
