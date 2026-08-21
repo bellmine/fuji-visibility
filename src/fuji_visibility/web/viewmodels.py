@@ -6,7 +6,7 @@ from datetime import date, datetime, time
 from typing import Iterable
 
 from ..consensus import ConsensusHour, ConsensusResult
-from ..decision import DecisionDay, DecisionHour, DecisionResult, DecisionWindow
+from ..decision import BestBlock, DecisionDay, DecisionHour, DecisionResult, DecisionWindow
 from ..services import DashboardData
 from ..stability import StabilityMetrics, StabilityPoint
 from ..time_utils import canonical_iso, to_jst
@@ -21,7 +21,9 @@ from .i18n import (
     PROXY_AGREEMENT_LABELS,
     REFRESH_STATUS_LABELS,
     STABILITY_LABELS,
+    TREND_SHORT_LABELS,
     TREND_LABELS,
+    WARNING_LABELS,
     label,
     localized_coverage,
     localized_date,
@@ -34,12 +36,16 @@ def dashboard_payload(data: DashboardData, *, selected_date: date | None = None)
     day_by_date = {day.date: day for day in data.decision.days}
     selected = selected_date or _default_selected_date(data.decision, data.dates)
     selected_result = result_by_date.get(selected)
+    rank_by_date = {
+        day.date: rank for rank, day in enumerate(data.decision.ranked_days, start=1)
+    }
     days = [
         day_payload(
             target_date,
             result_by_date.get(target_date),
             day_by_date.get(target_date),
             data.stability_by_time,
+            rank=rank_by_date.get(target_date),
         )
         for target_date in data.dates
     ]
@@ -84,6 +90,7 @@ def decision_payload(result: DecisionResult) -> dict[str, object]:
             "status": hour.status,
             "confidence": hour.confidence,
             "decision_reasons": list(hour.decision_reasons),
+            "warnings": warning_payload(hour.warning_codes),
             "proxy": consensus.proxy_payload,
             "field_consensus": _localized_field_consensus(consensus.field_consensus_summary),
         }
@@ -114,6 +121,14 @@ def decision_payload(result: DecisionResult) -> dict[str, object]:
         "days": [
             {
                 "date": day.date.isoformat(),
+                "date_label": localized_date(day.date),
+                "rank": next(
+                    (index for index, ranked in enumerate(result.ranked_days, start=1) if ranked.date == day.date),
+                    None,
+                ),
+                "best_block": best_block_payload(day.best_block),
+                "top_hours": [decision_hour_payload(hour) for hour in day.top_hours],
+                "day_rank_score": day.day_rank_score,
                 "best_window": window_payload(day.best_window),
                 "windows": [window_payload(window) for window in day.windows],
                 "best_promising_window": window_payload(day.best_promising_window),
@@ -124,6 +139,16 @@ def decision_payload(result: DecisionResult) -> dict[str, object]:
             }
             for day in result.days
         ],
+        "ranked_days": [
+            {
+                "rank": rank,
+                "date": day.date.isoformat(),
+                "date_label": localized_date(day.date),
+                "day_rank_score": day.day_rank_score,
+                "best_block": best_block_payload(day.best_block),
+            }
+            for rank, day in enumerate(result.ranked_days, start=1)
+        ],
     }
 
 
@@ -132,11 +157,17 @@ def day_payload(
     result: ConsensusResult | None,
     decision_day: DecisionDay | None,
     stability_by_time: dict[str, StabilityMetrics],
+    *,
+    rank: int | None = None,
 ) -> dict[str, object]:
     if result is None:
         return {
             "date": target_date.isoformat(),
             "label": localized_date(target_date),
+            "rank": rank,
+            "best_block": None,
+            "top_hours": [],
+            "day_rank_score": None,
             "best_window": None,
             "best_promising_window": None,
             "status": "INSUFFICIENT EVIDENCE",
@@ -148,12 +179,22 @@ def day_payload(
     decision_hours = {
         canonical_iso(item.consensus.valid_time): item for item in (decision_day.hours if decision_day else ())
     }
+    top_rank_by_time = {
+        canonical_iso(item.consensus.valid_time): index
+        for index, item in enumerate(decision_day.top_hours if decision_day else (), start=1)
+    }
+    best_block_times = {
+        canonical_iso(item.consensus.valid_time)
+        for item in (decision_day.best_block.hours if decision_day and decision_day.best_block else ())
+    }
     if decision_day is not None:
         selected_hours = [
             hour_payload(
                 item.consensus,
                 item,
                 stability_by_time.get(canonical_iso(item.consensus.valid_time)),
+                top_rank=top_rank_by_time.get(canonical_iso(item.consensus.valid_time)),
+                is_best_block=canonical_iso(item.consensus.valid_time) in best_block_times,
             )
             for item in decision_day.hours
         ]
@@ -163,12 +204,27 @@ def day_payload(
                 hour,
                 decision_hours.get(canonical_iso(hour.valid_time)),
                 stability_by_time.get(canonical_iso(hour.valid_time)),
+                top_rank=top_rank_by_time.get(canonical_iso(hour.valid_time)),
+                is_best_block=canonical_iso(hour.valid_time) in best_block_times,
             )
             for hour in result.hours
         ]
     return {
         "date": target_date.isoformat(),
         "label": localized_date(target_date),
+        "rank": rank,
+        "best_block": best_block_payload(decision_day.best_block if decision_day else None),
+        "top_hours": [
+            hour_payload(
+                item.consensus,
+                item,
+                stability_by_time.get(canonical_iso(item.consensus.valid_time)),
+                top_rank=index,
+                is_best_block=canonical_iso(item.consensus.valid_time) in best_block_times,
+            )
+            for index, item in enumerate(decision_day.top_hours if decision_day else (), start=1)
+        ],
+        "day_rank_score": decision_day.day_rank_score if decision_day else None,
         "best_window": window_payload(decision_day.best_window if decision_day else None),
         "best_promising_window": window_payload(
             decision_day.best_promising_window if decision_day else None
@@ -187,18 +243,34 @@ def hour_payload(
     hour: ConsensusHour,
     decision_hour: DecisionHour | None,
     stability: StabilityMetrics | None,
+    *,
+    top_rank: int | None = None,
+    is_best_block: bool = False,
 ) -> dict[str, object]:
+    reachable = True if decision_hour is None else decision_hour.reachable
+    status = "OTHER" if decision_hour is None else decision_hour.status
+    warning_codes = (
+        _consensus_warning_codes(hour)
+        if decision_hour is None
+        else decision_hour.warning_codes
+    )
+    stability_data = stability_payload(stability)
     return {
         "valid_time": canonical_iso(hour.valid_time),
         "local_time": to_jst(hour.valid_time).strftime("%H:%M"),
-        "reachable": True if decision_hour is None else decision_hour.reachable,
+        "reachable": reachable,
         "qualifies": False if decision_hour is None else decision_hour.qualifies,
-        "status": "OTHER" if decision_hour is None else decision_hour.status,
+        "status": status,
         "status_label": label(
             HOUR_STATUS_LABELS,
-            "OTHER" if decision_hour is None else decision_hour.status,
+            status,
             default="暂无法判断",
         ),
+        "condition_label": _condition_label(hour.proxy_median, reachable, top_rank),
+        "top_rank": top_rank,
+        "top_rank_label": _top_rank_label(top_rank),
+        "is_best_hour": top_rank == 1,
+        "is_best_block": is_best_block,
         "confidence": "INSUFFICIENT" if decision_hour is None else decision_hour.confidence,
         "confidence_label": _confidence_label(
             "INSUFFICIENT" if decision_hour is None else decision_hour.confidence
@@ -244,11 +316,15 @@ def hour_payload(
         "field_consensus": _localized_field_consensus(hour.field_consensus_summary),
         "consensus": hour.consensus_label,
         "consensus_label": label(CONSENSUS_LABELS, hour.consensus_label),
-        "reachability_label": "可到达" if (decision_hour is None or decision_hour.reachable) else "到达前",
+        "reachability_label": "可到达" if reachable else "到达前",
         "window_label": "符合条件" if (decision_hour is not None and decision_hour.qualifies) else "不符合条件",
         "coverage_label": localized_coverage(hour.full_model_count, hour.model_count),
         "outlier_models": list(hour.outlier_models),
-        "stability": stability_payload(stability),
+        "trend": stability_data["trend"],
+        "trend_label": TREND_SHORT_LABELS.get(str(stability_data["trend"]), "暂无趋势"),
+        "trend_detail_label": stability_data["trend_label"],
+        "warnings": warning_payload(warning_codes),
+        "stability": stability_data,
         "models": [
             {
                 "model": member.model,
@@ -324,6 +400,55 @@ def trend_payload(metrics: StabilityMetrics, *, variable: str = "proxy") -> dict
     }
 
 
+def best_block_payload(block: BestBlock | None) -> dict[str, object] | None:
+    if block is None:
+        return None
+    peak = block.peak.consensus
+    return {
+        "start": canonical_iso(block.start),
+        "end": canonical_iso(block.end),
+        "start_local_time": to_jst(block.start).strftime("%H:%M"),
+        "end_local_time": to_jst(block.end).strftime("%H:%M"),
+        "duration_hours": block.duration_hours,
+        "peak_time": canonical_iso(peak.valid_time),
+        "peak_proxy": block.peak_proxy,
+        "peak_proxy_median": block.peak_proxy,
+        "mean_proxy": block.mean_proxy,
+        "trend": block.peak.stability.trend_label,
+        "trend_label": TREND_SHORT_LABELS.get(block.peak.stability.trend_label, "暂无趋势"),
+        "warnings": warning_payload(block.warnings),
+        "hours": [canonical_iso(item.consensus.valid_time) for item in block.hours],
+    }
+
+
+def warning_payload(codes: Iterable[str]) -> dict[str, object]:
+    values = tuple(dict.fromkeys(codes))
+    return {
+        "codes": list(values),
+        "labels": [label(WARNING_LABELS, code, default="需要注意") for code in values],
+    }
+
+
+def _consensus_warning_codes(hour: ConsensusHour) -> tuple[str, ...]:
+    warnings: list[str] = []
+    if hour.proxy_agreement == "SEVERE":
+        warnings.append("MODEL_DISAGREEMENT")
+    fields = hour.field_consensus
+    if fields.get("mid_cloud") is not None and fields["mid_cloud"].support == "OPPOSED":
+        warnings.append("MID_CLOUD_RISK")
+    if fields.get("precipitation") is not None and fields["precipitation"].support == "OPPOSED":
+        warnings.append("PRECIPITATION_RISK")
+    visibility = fields.get("visibility")
+    if (
+        visibility is not None
+        and visibility.model_count >= 3
+        and visibility.support in {"MIXED", "OPPOSED"}
+        and (visibility.stddev or 0.0) >= 10.0
+    ):
+        warnings.append("VISIBILITY_DISAGREEMENT")
+    return tuple(warnings)
+
+
 def window_payload(window: DecisionWindow | None) -> dict[str, object] | None:
     if window is None:
         return None
@@ -397,11 +522,16 @@ def _point_value(point: StabilityPoint, variable: str) -> float | None:
 
 
 def _default_selected_date(result: DecisionResult, dates: Iterable[date]) -> date | None:
-    if result.winner is not None:
+    ordered_dates = tuple(dates)
+    allowed = set(ordered_dates)
+    for day in result.ranked_days:
+        if day.date in allowed and day.day_rank_score is not None:
+            return day.date
+    if result.winner is not None and result.winner.date in allowed:
         return result.winner.date
-    if result.promising_winner is not None:
+    if result.promising_winner is not None and result.promising_winner.date in allowed:
         return result.promising_winner.date
-    return next(iter(dates), None)
+    return next(iter(ordered_dates), None)
 
 
 def _confidence_label(value: str | None) -> str:
@@ -423,6 +553,26 @@ def _localized_field_consensus(
             item["values_km"] = item.get("values", [])
         result[name] = item
     return result
+
+
+def _top_rank_label(rank: int | None) -> str | None:
+    return {1: "最高分", 2: "次高", 3: "第三"}.get(rank)
+
+
+def _condition_label(proxy: float | None, reachable: bool, rank: int | None) -> str:
+    if not reachable:
+        return "到达前"
+    if proxy is None:
+        return "数据不足"
+    if rank == 1:
+        return "最佳时段"
+    if rank in {2, 3}:
+        return _top_rank_label(rank) or ""
+    if proxy >= 75:
+        return "较好"
+    if proxy >= 60:
+        return "一般"
+    return "较差"
 
 
 def _day_status(day: DecisionDay | None) -> str:

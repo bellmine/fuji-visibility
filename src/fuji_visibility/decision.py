@@ -8,6 +8,7 @@ from statistics import mean, median, pstdev
 from typing import Iterable, Sequence
 
 from .config import (
+    BEST_BLOCK_HOURS,
     DECISION_MIN_PROXY_DIFFERENCE,
     DECISION_MIN_WINDOW_HOURS,
     FIELD_SUPPORT_STRONG_MIN_MODELS,
@@ -43,6 +44,34 @@ class DecisionHour:
     @property
     def promising(self) -> bool:
         return self.status == "PROMISING"
+
+    @property
+    def warning_codes(self) -> tuple[str, ...]:
+        return _hour_warning_codes(self)
+
+
+@dataclass(frozen=True)
+class BestBlock:
+    """Best reachable contiguous block for hourly browsing.
+
+    This is deliberately separate from ``DecisionWindow``: a best block is
+    a ranking aid and must not inherit the formal qualification gate.
+    """
+
+    start: datetime
+    end: datetime
+    hours: tuple[DecisionHour, ...]
+    peak: DecisionHour
+    mean_proxy: float
+    warnings: tuple[str, ...] = ()
+
+    @property
+    def duration_hours(self) -> int:
+        return len(self.hours)
+
+    @property
+    def peak_proxy(self) -> float:
+        return self.peak.consensus.proxy_median or 0.0
 
 
 @dataclass(frozen=True)
@@ -88,6 +117,9 @@ class DecisionDay:
     hours: tuple[DecisionHour, ...]
     windows: tuple[DecisionWindow, ...]
     promising_windows: tuple[DecisionWindow, ...] = ()
+    best_block: BestBlock | None = None
+    top_hours: tuple[DecisionHour, ...] = ()
+    day_rank_score: float | None = None
 
     @property
     def best_window(self) -> DecisionWindow | None:
@@ -124,6 +156,10 @@ class DecisionResult:
         return "NO QUALIFYING WINDOW"
 
     @property
+    def ranked_days(self) -> tuple[DecisionDay, ...]:
+        return tuple(sorted(self.days, key=_day_rank_key, reverse=True))
+
+    @property
     def field_consensus_summary(self) -> dict[str, dict[str, object]]:
         day = self.winner or self.promising_winner
         if day is None:
@@ -145,6 +181,7 @@ def decide_days(
     min_full_proxy_models: int | None = None,
     min_full_models: int | None = None,
     proxy_difference_threshold: float = DECISION_MIN_PROXY_DIFFERENCE,
+    best_block_hours: int = BEST_BLOCK_HOURS,
     max_proxy_spread_strong: float = MAX_PROXY_SPREAD_FOR_STRONG_SUPPORT,
     max_proxy_spread_weak: float = MAX_PROXY_SPREAD_FOR_WEAK_SUPPORT,
     good_mid_cloud_max: float = GOOD_MID_CLOUD_MAX,
@@ -154,6 +191,8 @@ def decide_days(
 ) -> DecisionResult:
     if min_window_hours <= 0:
         raise ValueError("min_window_hours must be positive")
+    if best_block_hours <= 0:
+        raise ValueError("best_block_hours must be positive")
     start_hour, end_hour = hours
     arrival = parse_clock(arrival_after) if isinstance(arrival_after, str) else arrival_after
     stability = stability_by_time or {}
@@ -200,6 +239,12 @@ def decide_days(
         assessments.sort(key=lambda item: item.consensus.valid_time)
         windows = _candidate_windows(assessments, min_window_hours=min_window_hours)
         promising_windows = _promising_windows(assessments)
+        best_block = _best_continuous_block(assessments, duration_hours=best_block_hours)
+        top_hours = _top_hours(assessments)
+        fallback_score = max(
+            (hour.consensus.proxy_median for hour in top_hours),
+            default=None,
+        )
         days.append(
             DecisionDay(
                 date=target_date,
@@ -208,6 +253,9 @@ def decide_days(
                 promising_windows=tuple(
                     sorted(promising_windows, key=_window_sort_key, reverse=True)
                 ),
+                best_block=best_block,
+                top_hours=top_hours,
+                day_rank_score=(best_block.mean_proxy if best_block is not None else fallback_score),
             )
         )
     winner, ambiguous, rationale = _choose_winner(
@@ -462,6 +510,99 @@ def _promising_windows(assessments: Sequence[DecisionHour]) -> list[DecisionWind
     return [_window(group, status="PROMISING") for group in groups]
 
 
+def _best_continuous_block(
+    assessments: Sequence[DecisionHour], *, duration_hours: int
+) -> BestBlock | None:
+    candidates = [
+        assessment
+        for assessment in assessments
+        if assessment.reachable and assessment.consensus.proxy_median is not None
+    ]
+    if len(candidates) < duration_hours:
+        return None
+    blocks: list[BestBlock] = []
+    for start in range(len(candidates) - duration_hours + 1):
+        group = candidates[start : start + duration_hours]
+        if len(group) != duration_hours:
+            continue
+        if not all(_adjacent(left, right) for left, right in zip(group, group[1:])):
+            continue
+        blocks.append(_best_block(group))
+    if not blocks:
+        return None
+    return max(
+        blocks,
+        key=lambda block: (
+            block.mean_proxy,
+            block.peak_proxy,
+            -block.start.timestamp(),
+        ),
+    )
+
+
+def _best_block(group: Sequence[DecisionHour]) -> BestBlock:
+    peak = max(
+        group,
+        key=lambda item: (
+            item.consensus.proxy_median if item.consensus.proxy_median is not None else float("-inf"),
+            -item.consensus.valid_time.timestamp(),
+        ),
+    )
+    proxies = [item.consensus.proxy_median for item in group if item.consensus.proxy_median is not None]
+    return BestBlock(
+        start=group[0].consensus.valid_time,
+        end=group[-1].consensus.valid_time,
+        hours=tuple(group),
+        peak=peak,
+        mean_proxy=float(mean(proxies)),
+        warnings=tuple(
+            warning
+            for warning in ("MODEL_DISAGREEMENT", "MID_CLOUD_RISK", "PRECIPITATION_RISK", "VISIBILITY_DISAGREEMENT")
+            if any(warning in item.warning_codes for item in group)
+        ),
+    )
+
+
+def _top_hours(assessments: Sequence[DecisionHour]) -> tuple[DecisionHour, ...]:
+    candidates = [
+        assessment
+        for assessment in assessments
+        if assessment.reachable and assessment.consensus.proxy_median is not None
+    ]
+    return tuple(
+        sorted(
+            candidates,
+            key=lambda item: (
+                -(item.consensus.proxy_median or float("-inf")),
+                item.consensus.valid_time,
+            ),
+        )[:3]
+    )
+
+
+def _hour_warning_codes(hour: DecisionHour) -> tuple[str, ...]:
+    warnings: list[str] = []
+    consensus = hour.consensus
+    if consensus.proxy_agreement == "SEVERE":
+        warnings.append("MODEL_DISAGREEMENT")
+    fields = consensus.field_consensus
+    mid_cloud = fields.get("mid_cloud")
+    if mid_cloud is not None and mid_cloud.support == "OPPOSED":
+        warnings.append("MID_CLOUD_RISK")
+    precipitation = fields.get("precipitation")
+    if precipitation is not None and precipitation.support == "OPPOSED":
+        warnings.append("PRECIPITATION_RISK")
+    visibility = fields.get("visibility")
+    if (
+        visibility is not None
+        and visibility.model_count >= 3
+        and visibility.support in {"MIXED", "OPPOSED"}
+        and (visibility.stddev or 0.0) >= 10.0
+    ):
+        warnings.append("VISIBILITY_DISAGREEMENT")
+    return tuple(warnings)
+
+
 def _window(group: Sequence[DecisionHour], *, status: str = "QUALIFIES") -> DecisionWindow:
     peak = max(group, key=lambda item: item.consensus.proxy_median or float("-inf"))
     proxies = [item.consensus.proxy_median for item in group if item.consensus.proxy_median is not None]
@@ -699,6 +840,18 @@ def _window_sort_key(window: DecisionWindow | None) -> tuple[int, int, int, floa
     )
 
 
+def _day_rank_key(day: DecisionDay) -> tuple[bool, float, float, int]:
+    score = day.day_rank_score
+    peak = day.best_block.peak_proxy if day.best_block is not None else float("-inf")
+    # Earlier dates win exact ties, while days with no usable score sort last.
+    return (
+        score is not None,
+        score if score is not None else float("-inf"),
+        peak,
+        -day.date.toordinal(),
+    )
+
+
 def _window_trend(group: Sequence[DecisionHour]) -> str:
     labels = [item.stability.trend_label for item in group]
     if "VOLATILE" in labels:
@@ -755,6 +908,20 @@ def _unknown_stability() -> StabilityMetrics:
 def decision_payload(result: DecisionResult) -> dict[str, object]:
     """JSON-safe derived decision output for diagnostics and automation."""
 
+    def best_block_payload(block: BestBlock | None) -> dict[str, object] | None:
+        if block is None:
+            return None
+        peak = block.peak.consensus
+        return {
+            "start": canonical_iso(block.start),
+            "end": canonical_iso(block.end),
+            "duration_hours": block.duration_hours,
+            "peak_time": canonical_iso(peak.valid_time),
+            "peak_proxy": block.peak_proxy,
+            "mean_proxy": block.mean_proxy,
+            "warnings": list(block.warnings),
+        }
+
     def window_payload(window: DecisionWindow | None) -> dict[str, object] | None:
         if window is None:
             return None
@@ -799,6 +966,7 @@ def decision_payload(result: DecisionResult) -> dict[str, object]:
             "consensus": consensus.consensus_label,
             "stability": hour.stability.confidence,
             "trend": hour.stability.trend_label,
+            "warnings": list(hour.warning_codes),
             "proxy": consensus.proxy_payload,
             "field_consensus": consensus.field_consensus_summary,
         }
@@ -820,6 +988,9 @@ def decision_payload(result: DecisionResult) -> dict[str, object]:
         "days": [
             {
                 "date": day.date.isoformat(),
+                "best_block": best_block_payload(day.best_block),
+                "top_hours": [hour_payload(hour) for hour in day.top_hours],
+                "day_rank_score": day.day_rank_score,
                 "best_window": window_payload(day.best_window),
                 "windows": [window_payload(window) for window in day.windows],
                 "best_promising_window": window_payload(day.best_promising_window),
@@ -829,5 +1000,14 @@ def decision_payload(result: DecisionResult) -> dict[str, object]:
                 "hours": [hour_payload(hour) for hour in day.hours],
             }
             for day in result.days
+        ],
+        "ranked_days": [
+            {
+                "rank": rank,
+                "date": day.date.isoformat(),
+                "day_rank_score": day.day_rank_score,
+                "best_block": best_block_payload(day.best_block),
+            }
+            for rank, day in enumerate(result.ranked_days, start=1)
         ],
     }

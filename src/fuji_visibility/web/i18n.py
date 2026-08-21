@@ -30,6 +30,16 @@ TREND_LABELS = {
     "UNKNOWN": "未知",
 }
 
+# Short labels used inline in the hourly browser. Keep TREND_LABELS as the
+# longer compatibility wording used by the trend panel and API.
+TREND_SHORT_LABELS = {
+    "IMPROVING": "改善",
+    "WORSENING": "恶化",
+    "STABLE": "稳定",
+    "VOLATILE": "波动大",
+    "UNKNOWN": "暂无趋势",
+}
+
 STABILITY_LABELS = {
     "HIGH": "高",
     "MEDIUM": "中",
@@ -77,6 +87,13 @@ PROXY_AGREEMENT_LABELS = {
     "MIXED": "存在分歧",
     "SEVERE": "分歧较大",
     "INSUFFICIENT": "数据不足",
+}
+
+WARNING_LABELS = {
+    "MODEL_DISAGREEMENT": "模型分歧大",
+    "MID_CLOUD_RISK": "中层云偏多",
+    "PRECIPITATION_RISK": "降水风险",
+    "VISIBILITY_DISAGREEMENT": "能见度分歧",
 }
 
 DECISION_REASON_LABELS = {

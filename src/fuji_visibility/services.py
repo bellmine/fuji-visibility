@@ -258,6 +258,7 @@ class DashboardService:
             stability_by_time=stability_by_time,
             min_proxy=self.settings.min_proxy,
             min_window_hours=self.settings.min_window_hours,
+            best_block_hours=self.settings.best_block_hours,
             min_full_proxy_models=self.settings.min_full_proxy_models,
             max_proxy_spread_strong=self.settings.max_proxy_spread_strong,
             max_proxy_spread_weak=self.settings.max_proxy_spread_weak,

@@ -139,6 +139,9 @@ STABILITY_HIGH_MIN_SNAPSHOTS = 4
 
 DECISION_MIN_PROXY_DIFFERENCE = 5.0
 DECISION_MIN_WINDOW_HOURS = 2
+# Phase 3.2: the best available continuous browser block is a ranking aid,
+# independent from the formal qualification window.
+BEST_BLOCK_HOURS = 2
 # Deprecated compatibility name. New decision code uses the configurable
 # field-level threshold above.
 DECISION_MIN_FULL_MODELS = MIN_FULL_PROXY_MODELS

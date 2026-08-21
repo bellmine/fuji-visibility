@@ -8,6 +8,7 @@ from datetime import time
 from pathlib import Path
 
 from ..config import (
+    BEST_BLOCK_HOURS,
     CANDIDATE_MODELS,
     DEFAULT_DATABASE_PATH,
     DEFAULT_LOCATION,
@@ -71,6 +72,7 @@ class DashboardSettings:
     good_precip_max: float = GOOD_PRECIP_MAX
     good_humidity_max: float = GOOD_HUMIDITY_MAX
     min_window_hours: int = 2
+    best_block_hours: int = BEST_BLOCK_HOURS
 
     @classmethod
     def from_env(cls) -> "DashboardSettings":
@@ -125,6 +127,7 @@ class DashboardSettings:
             good_precip_max=_env_float("FUJI_GOOD_PRECIP_MAX", GOOD_PRECIP_MAX),
             good_humidity_max=_env_float("FUJI_GOOD_HUMIDITY_MAX", GOOD_HUMIDITY_MAX),
             min_window_hours=max(1, _env_int("FUJI_MIN_WINDOW_HOURS", 2)),
+            best_block_hours=max(1, _env_int("FUJI_BEST_BLOCK_HOURS", BEST_BLOCK_HOURS)),
         )
 
     @property
