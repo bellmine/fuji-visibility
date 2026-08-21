@@ -40,6 +40,24 @@ def parse_clock(value: str) -> time:
     return parsed.replace(second=0, microsecond=0)
 
 
+def full_local_date_range(
+    days: int,
+    *,
+    first_date: date | None = None,
+) -> tuple[date, date]:
+    """Return inclusive JST date bounds for a full-day forecast request.
+
+    The Open-Meteo client always sends ``timezone=Asia/Tokyo``. Pairing these
+    date bounds with that request parameter yields 00:00–23:00 JST for every
+    forecast day, regardless of the dashboard's selected display range.
+    """
+
+    if days <= 0:
+        raise ValueError("days must be positive")
+    start = first_date or datetime.now(JST).date()
+    return start, start + timedelta(days=days - 1)
+
+
 def canonical_iso(value: datetime) -> str:
     """Return a stable JST ISO string for SQLite equality and display."""
 

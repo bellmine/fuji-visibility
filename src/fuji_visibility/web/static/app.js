@@ -26,7 +26,7 @@
     button.addEventListener("click", async function () {
       button.disabled = true;
       if (label) label.textContent = "刷新中…";
-      setRefreshMessage("正在获取已配置的模型并保存新的预报快照…");
+      setRefreshMessage("正在获取已配置的预报来源并保存新的预报快照…");
       try {
         const response = await fetch("/api/refresh", {
           method: "POST",
@@ -46,6 +46,21 @@
         setRefreshMessage(error instanceof Error ? error.message : "预报刷新失败，请稍后重试。", "error");
       }
     });
+  }
+
+  function setupHoursPreset() {
+    const preset = query("[data-hours-preset]");
+    const input = query('input[name="hours"]');
+    if (!preset || !input) return;
+    const syncPreset = () => {
+      const matchingOption = [...preset.options].find((option) => option.value === input.value.trim());
+      preset.value = matchingOption ? matchingOption.value : "";
+    };
+    preset.addEventListener("change", () => {
+      if (preset.value) input.value = preset.value;
+    });
+    input.addEventListener("input", syncPreset);
+    syncPreset();
   }
 
   function selectedDay(dateValue) {
@@ -193,6 +208,7 @@
 
   document.addEventListener("DOMContentLoaded", function () {
     setupRefresh();
+    setupHoursPreset();
     setupTrend();
   });
 }());

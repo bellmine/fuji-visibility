@@ -101,7 +101,7 @@ def register_routes(app: FastAPI, templates: Jinja2Templates) -> None:
                         "last_refresh_status_label": label(REFRESH_STATUS_LABELS, "unknown"),
                         "full_models": 0,
                         "configured_models": 0,
-                        "coverage_label": "0 个模型中 0 个数据完整",
+                        "coverage_label": "汇总 0 个预报来源",
                         "last_successful_snapshot": None,
                     },
                     "days": [],
@@ -268,7 +268,7 @@ def register_routes(app: FastAPI, templates: Jinja2Templates) -> None:
             return RefreshResponse(
                 status=status,
                 message=(
-                    "预报已刷新，但部分模型只返回了部分数据。"
+                    "部分预报来源获取失败，本次结果可能不完整。"
                     if failures
                     else "预报刷新成功。"
                 ),

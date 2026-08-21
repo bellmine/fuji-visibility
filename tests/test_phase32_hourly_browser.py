@@ -146,4 +146,4 @@ def test_hour_view_model_exposes_inline_trend_and_warning() -> None:
     assert payload["trend_label"] == "改善"
     assert payload["top_rank_label"] == "最高分"
     assert payload["is_best_block"] is True
-    assert payload["warnings"]["labels"] == ["模型分歧大"]
+    assert payload["warnings"]["labels"] == ["预报来源分歧大"]

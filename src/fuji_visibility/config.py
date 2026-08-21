@@ -12,6 +12,11 @@ FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
 SINGLE_RUNS_URL = "https://single-runs-api.open-meteo.com/v1/forecast"
 PREVIOUS_RUNS_URL = "https://previous-runs-api.open-meteo.com/v1/forecast"
 
+# Collection is deliberately independent from the dashboard's presentation
+# range. Open-Meteo date-bounded requests use this timezone and return the
+# complete local day, 00:00 through 23:00 JST.
+FORECAST_COLLECTION_HOURS: tuple[int, int] = (0, 23)
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DATA_DIR = PROJECT_ROOT / "data"
 DEFAULT_DATABASE_PATH = DATA_DIR / "fuji_forecasts.sqlite"

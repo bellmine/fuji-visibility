@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+from datetime import date
+
 import httpx
 
 from fuji_visibility.open_meteo import OpenMeteoClient
+from fuji_visibility.time_utils import full_local_date_range
 
 
 def test_forecast_response_is_normalized_and_jst(forecast_payload):
@@ -58,6 +61,13 @@ def test_single_run_parameter_is_utc_aligned():
     )
     assert params["models"] == "jma_gsm"
     assert params["run"] == "2026-08-20T18:00"
+
+
+def test_full_local_date_range_is_inclusive():
+    assert full_local_date_range(3, first_date=date(2026, 8, 21)) == (
+        date(2026, 8, 21),
+        date(2026, 8, 23),
+    )
 
 
 def test_previous_runs_uses_base_fields_for_current_run():

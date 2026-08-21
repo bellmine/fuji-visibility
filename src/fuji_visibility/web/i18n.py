@@ -55,12 +55,12 @@ FRESHNESS_LABELS = {
 }
 
 MODEL_STATUS_LABELS = {
-    "FULL_PROXY": "完整评分",
-    "PARTIAL_USEFUL": "部分可用",
-    "UNAVAILABLE": "不可用",
+    "FULL_PROXY": "综合评分可用",
+    "PARTIAL_USEFUL": "按字段提供",
+    "UNAVAILABLE": "暂无当前数据",
     # Compatibility labels for Phase 2 metadata.
-    "FULL": "完整评分",
-    "PARTIAL": "部分可用",
+    "FULL": "综合评分可用",
+    "PARTIAL": "按字段提供",
 }
 
 FIELD_SUPPORT_LABELS = {
@@ -74,8 +74,8 @@ FIELD_SUPPORT_LABELS = {
 HOUR_STATUS_LABELS = {
     "BEFORE_ARRIVAL": "到达前",
     "LOW_SCORE": "评分不足",
-    "MODEL_DISAGREEMENT": "模型分歧较大",
-    "FIELD_CONSENSUS_WEAK": "多模型支持不足",
+    "MODEL_DISAGREEMENT": "预报来源分歧较大",
+    "FIELD_CONSENSUS_WEAK": "预报来源支持不足",
     "INSUFFICIENT_CORE_DATA": "核心数据不足",
     "PROMISING": "值得关注",
     "QUALIFIES": "符合条件",
@@ -90,7 +90,7 @@ PROXY_AGREEMENT_LABELS = {
 }
 
 WARNING_LABELS = {
-    "MODEL_DISAGREEMENT": "模型分歧大",
+    "MODEL_DISAGREEMENT": "预报来源分歧大",
     "MID_CLOUD_RISK": "中层云偏多",
     "PRECIPITATION_RISK": "降水风险",
     "VISIBILITY_DISAGREEMENT": "能见度分歧",
@@ -98,27 +98,27 @@ WARNING_LABELS = {
 
 DECISION_REASON_LABELS = {
     "BEFORE_ARRIVAL": "到达时间尚未满足",
-    "FULL_PROXY_MODELS_INSUFFICIENT": "完整评分来源数量不足",
+    "FULL_PROXY_MODELS_INSUFFICIENT": "参与综合评分的预报来源数量不足",
     "INSUFFICIENT_CORE_DATA": "核心数据不足",
     "PROXY_UNAVAILABLE": "暂无综合评分",
     "LOW_PROXY": "综合评分低于门槛",
     "PROXY_BELOW_THRESHOLD": "综合评分未达到门槛",
     "PROXY_OK": "综合评分达到门槛",
     "PROXY_ABOVE_THRESHOLD": "综合评分达到门槛",
-    "FULL_PROXY_MODELS_OK": "完整评分来源数量满足要求",
-    "PROXY_MODELS_AGREE": "完整评分来源一致性良好",
-    "PROXY_DISAGREEMENT_LIMITED": "完整评分来源存在一定分歧",
-    "PROXY_DISAGREEMENT": "完整评分来源分歧较大",
-    "PROXY_DISAGREEMENT_SEVERE": "完整评分来源严重分歧",
+    "FULL_PROXY_MODELS_OK": "参与综合评分的预报来源数量满足要求",
+    "PROXY_MODELS_AGREE": "参与综合评分的预报来源一致性良好",
+    "PROXY_DISAGREEMENT_LIMITED": "参与综合评分的预报来源存在一定分歧",
+    "PROXY_DISAGREEMENT": "参与综合评分的预报来源分歧较大",
+    "PROXY_DISAGREEMENT_SEVERE": "参与综合评分的预报来源严重分歧",
     "MID_CLOUD_INSUFFICIENT": "中层云数据不足",
-    "MID_CLOUD_OPPOSED": "多数模型认为中层云条件不利",
-    "MID_CLOUD_STRONGLY_SUPPORTED": "多模型一致支持中层云量较低",
-    "MID_CLOUD_SUPPORTED": "多模型支持中层云条件可接受",
+    "MID_CLOUD_OPPOSED": "多数预报来源认为中层云条件不利",
+    "MID_CLOUD_STRONGLY_SUPPORTED": "多个预报来源一致支持中层云量较低",
+    "MID_CLOUD_SUPPORTED": "多个预报来源支持中层云条件可接受",
     "PRECIP_INSUFFICIENT": "降水数据不足",
-    "PRECIP_OPPOSED": "多数模型认为降水风险偏高",
-    "PRECIP_SUPPORTED": "多模型支持降水风险可接受",
+    "PRECIP_OPPOSED": "多数预报来源认为降水风险偏高",
+    "PRECIP_SUPPORTED": "多个预报来源支持降水风险可接受",
     "VISIBILITY_SUPPORTED": "能见度达到支持条件",
-    "LIMITED_VISIBILITY_MODEL_COUNT": "能见度可用模型较少",
+    "LIMITED_VISIBILITY_MODEL_COUNT": "能见度可用预报来源较少",
     "HUMIDITY_OPPOSED": "湿度条件偏不利",
     "HUMIDITY_SUPPORTED": "湿度条件可接受",
     "CONFIDENCE_HIGH": "置信度高",
@@ -129,7 +129,7 @@ DECISION_REASON_LABELS = {
 
 REFRESH_STATUS_LABELS = {
     "success": "成功",
-    "partial": "部分完成",
+    "partial": "部分来源失败",
     "failed": "失败",
     "unknown": "未知",
 }
@@ -155,9 +155,9 @@ _RATIONALE_LABELS = {
     "A reachable evidence-supported promising window is available.": "目前有一个可到达、且有数据支持的值得关注时段。",
     "Only one candidate day has a reachable qualifying window.": "目前只有一个日期具备符合条件的可到达观景窗口。",
     "Only one candidate day has a reachable promising window.": "目前只有一个日期具备可到达的值得关注时段。",
-    "Recheck after the next model cycle.": "建议在下一轮模型更新后再次查看。",
+    "Recheck after the next model cycle.": "建议在下一轮预报更新后再次查看。",
     "longer reachable window": "可到达窗口更长",
-    "stronger multi-model agreement": "多模型一致性更强",
+    "stronger multi-model agreement": "预报来源一致性更强",
     "more stable recent forecast": "近期预报更稳定",
     "higher Proxy median": "综合评分中位数更高",
     "more favorable trend direction": "趋势方向更有利",
@@ -208,7 +208,7 @@ def localized_rationale(items: list[str] | tuple[str, ...]) -> list[str]:
     return translated
 
 
-def localized_coverage(full_models: int, configured_models: int) -> str:
-    """Describe model completeness in the wording used by the dashboard."""
+def localized_coverage(_full_models: int, configured_models: int) -> str:
+    """Describe the number of configured forecast sources neutrally."""
 
-    return f"{configured_models} 个模型中 {full_models} 个数据完整"
+    return f"汇总 {configured_models} 个预报来源"

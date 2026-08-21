@@ -13,6 +13,8 @@ from fuji_visibility.open_meteo import OpenMeteoError
 from fuji_visibility.services import (
     DashboardService,
     LAST_REFRESH_ATTEMPT,
+    LAST_REFRESH_FAILURES,
+    LAST_REFRESH_STATUS,
     RefreshCooldownError,
 )
 from fuji_visibility.storage import ForecastStore
@@ -65,6 +67,7 @@ def _seed(
     dates: tuple[str, ...] = ("2026-08-26", "2026-08-27"),
     partial_model: str | None = None,
     retrieved_at: str = "2026-08-20T05:30:00+09:00",
+    hours: tuple[int, ...] = (8, 9),
 ) -> None:
     with ForecastStore(settings.database_path) as store:
         for model in settings.configured_models:
@@ -76,7 +79,7 @@ def _seed(
                     partial=model == partial_model,
                 )
                 for target_date in dates
-                for hour in (8, 9)
+                for hour in hours
             ]
             result = ForecastResult(
                 model=model,
@@ -123,11 +126,14 @@ def test_homepage_and_json_apis_use_stored_consensus(tmp_path: Path) -> None:
     assert "推荐" in page.text
     assert "可到达时段逐小时预测" in page.text
     assert "数据状态" in page.text  # fixture is intentionally stale
+    assert "汇总多个天气预报来源，展示富士山逐小时观景条件，仅供出行参考。" in page.text
     assert "8月26日 周三" in page.text
     assert "window.__FUJI_DASHBOARD__" in page.text
     assert '<link rel="stylesheet" href="./static/app.css">' in page.text
     assert '<script src="./static/app.js" defer></script>' in page.text
     assert "http://fuji.wangdi.store/static/" not in page.text
+    assert 'data-hours-preset' in page.text
+    assert 'value="13-18"' in page.text
 
     decision = _get(
         app,
@@ -152,6 +158,58 @@ def test_homepage_and_json_apis_use_stored_consensus(tmp_path: Path) -> None:
     assert trend.json()["points"]
     assert trend.json()["trend_label"] == "未知"
     assert trend.json()["confidence_label"] == "未知"
+
+
+def test_hour_range_and_arrival_are_presentation_only_for_full_day_snapshots(
+    tmp_path: Path,
+) -> None:
+    settings = _settings(tmp_path)
+    _seed(settings, dates=("2026-08-26",), hours=tuple(range(24)))
+    app = create_app(settings)
+
+    before = _get(app, "/api/status").json()
+    assert before["hours"] == {"start": 5, "end": 12}
+    assert before["collection_hours"] == {"start": 0, "end": 23}
+
+    afternoon = _get(
+        app,
+        "/api/forecast?date=2026-08-26&dates=2026-08-26&hours=13-18&arrival_after=14:00",
+    )
+    assert afternoon.status_code == 200
+    afternoon_hours = afternoon.json()["day"]["hours"]
+    assert [item["local_time"] for item in afternoon_hours] == [
+        f"{hour:02d}:00" for hour in range(13, 19)
+    ]
+
+    decision = _get(
+        app,
+        "/api/decision?dates=2026-08-26&hours=13-18&arrival_after=14:00",
+    )
+    assert decision.status_code == 200
+    decision_day = decision.json()["days"][0]
+    assert [item["valid_time"][11:13] for item in decision_day["hours"]] == [
+        f"{hour:02d}" for hour in range(13, 19)
+    ]
+    assert decision_day["hours"][0]["reachable"] is False
+    assert decision_day["best_block"]["start_local_time"] == "14:00"
+
+    morning = _get(
+        app,
+        "/api/forecast?date=2026-08-26&dates=2026-08-26&hours=5-12&arrival_after=05:00",
+    )
+    assert morning.status_code == 200
+    assert [item["local_time"] for item in morning.json()["day"]["hours"]] == [
+        f"{hour:02d}:00" for hour in range(5, 13)
+    ]
+
+    after = _get(app, "/api/status").json()
+    assert after["snapshot_count"] == before["snapshot_count"] == 3
+    with ForecastStore(settings.database_path) as store:
+        assert store.hourly_count() == 3 * 24
+
+    trend = _get(app, "/api/trend?date=2026-08-26&hour=14:00&variable=proxy")
+    assert trend.status_code == 200
+    assert trend.json()["points"]
 
 
 def test_no_clear_winner_and_no_qualifying_window_are_explicit(tmp_path: Path) -> None:
@@ -184,10 +242,14 @@ def test_partial_model_diagnostics_and_health_status(tmp_path: Path) -> None:
 
     page = _get(app, "/?dates=2026-08-26&date=2026-08-26")
     assert page.status_code == 200
-    assert "部分可用" in page.text
+    assert "按字段提供" in page.text
     assert "值得关注" in page.text
-    assert "目前只有 2 个模型具备完整评分所需数据。" in page.text
-    assert "完整评分" in page.text
+    assert "目前只有 2 个模型具备完整评分所需数据。" not in page.text
+    assert "预报来源与可用数据" in page.text
+    assert "当前使用 3 个预报来源" in page.text
+    assert "✓" in page.text and "—" in page.text
+    assert "完整评分" not in page.text
+    assert "不可用" not in page.text
     assert "综合评分" in page.text and "中层云" in page.text and "降水" in page.text
 
     health = _get(app, "/health")
@@ -203,6 +265,49 @@ def test_partial_model_diagnostics_and_health_status(tmp_path: Path) -> None:
     with ForecastStore(settings.database_path) as store:
         journal_mode = store._connection.execute("PRAGMA journal_mode").fetchone()[0]
     assert str(journal_mode).lower() == "wal"
+
+
+def test_normal_source_capability_difference_does_not_render_warning(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _seed(
+        settings,
+        dates=("2026-08-26",),
+        partial_model="gfs_seamless",
+        retrieved_at=datetime.now(JST).isoformat(),
+    )
+    app = create_app(settings)
+
+    page = _get(app, "/?dates=2026-08-26&date=2026-08-26")
+    assert page.status_code == 200
+    assert "数据状态" not in page.text
+    assert "数据获取异常" not in page.text
+    assert "目前只有 2 个模型具备完整评分所需数据。" not in page.text
+
+    diagnostics = _get(app, "/diagnostics")
+    assert diagnostics.status_code == 200
+    assert "预报来源能力" in diagnostics.text
+    assert "数据获取异常" not in diagnostics.text
+
+
+def test_actual_source_failure_is_visible_separately(tmp_path: Path) -> None:
+    settings = _settings(tmp_path)
+    _seed(settings, dates=("2026-08-26",), retrieved_at=datetime.now(JST).isoformat())
+    with ForecastStore(settings.database_path) as store:
+        store.set_metadata(LAST_REFRESH_STATUS, "partial")
+        store.set_metadata(
+            LAST_REFRESH_FAILURES,
+            '[{"model":"jma_msm","reason":"请求超时"}]',
+        )
+    app = create_app(settings)
+
+    page = _get(app, "/?dates=2026-08-26&date=2026-08-26")
+    assert "部分预报来源获取失败，本次结果可能不完整。" in page.text
+    assert "数据获取异常" in page.text
+    assert "jma_msm" in page.text and "请求超时" in page.text
+
+    diagnostics = _get(app, "/diagnostics")
+    assert "数据获取异常" in diagnostics.text
+    assert "jma_msm" in diagnostics.text and "请求超时" in diagnostics.text
 
 
 def test_refresh_lock_contention_and_manual_cooldown(tmp_path: Path) -> None:

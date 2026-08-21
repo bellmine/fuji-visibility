@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import date, datetime, time
 from typing import Iterable
 
-from ..consensus import ConsensusHour, ConsensusResult
+from ..consensus import ConsensusHour, ConsensusResult, ForecastMember
 from ..decision import BestBlock, DecisionDay, DecisionHour, DecisionResult, DecisionWindow
 from ..services import DashboardData
 from ..stability import StabilityMetrics, StabilityPoint
@@ -36,6 +36,7 @@ def dashboard_payload(data: DashboardData, *, selected_date: date | None = None)
     day_by_date = {day.date: day for day in data.decision.days}
     selected = selected_date or _default_selected_date(data.decision, data.dates)
     selected_result = result_by_date.get(selected)
+    source_members = _source_members(data.daily_results)
     rank_by_date = {
         day.date: rank for rank, day in enumerate(data.decision.ranked_days, start=1)
     }
@@ -46,6 +47,7 @@ def dashboard_payload(data: DashboardData, *, selected_date: date | None = None)
             day_by_date.get(target_date),
             data.stability_by_time,
             rank=rank_by_date.get(target_date),
+            source_members=source_members,
         )
         for target_date in data.dates
     ]
@@ -159,6 +161,7 @@ def day_payload(
     stability_by_time: dict[str, StabilityMetrics],
     *,
     rank: int | None = None,
+    source_members: dict[str, ForecastMember] | None = None,
 ) -> dict[str, object]:
     if result is None:
         return {
@@ -232,7 +235,7 @@ def day_payload(
         "status": _day_status(decision_day),
         "status_label": label(DECISION_LABELS, _day_status(decision_day)),
         "hours": selected_hours,
-        "models": model_diagnostics(result),
+        "models": model_diagnostics(result, source_members=source_members),
         "failures": [
             {"model": failure.model, "reason": failure.reason} for failure in result.failures
         ],
@@ -344,28 +347,90 @@ def hour_payload(
     }
 
 
-def model_diagnostics(result: ConsensusResult) -> list[dict[str, object]]:
-    return [
-        {
-            "model": member.model,
-            "status": member.capability.status,
-            "status_label": label(
-                MODEL_STATUS_LABELS, member.capability.status
-            ),
-            "supported": member.capability.supported,
-            "supports": member.capability.supports,
-            "support_labels": {
-                name: "有" if supported else "—"
-                for name, supported in member.capability.supports.items()
-            },
-            "usable_fields": list(member.capability.usable_fields),
-            "variables_available": sorted(member.capability.variables_available),
-            "missing_required": sorted(member.capability.missing_required),
-            "missing_optional": sorted(member.capability.missing_optional),
-            "error": member.capability.error,
-        }
-        for member in result.members
-    ]
+def model_diagnostics(
+    result: ConsensusResult,
+    *,
+    source_members: dict[str, ForecastMember] | None = None,
+) -> list[dict[str, object]]:
+    """Build a source capability matrix without turning capabilities into health states."""
+
+    current_members = {member.model: member for member in result.members}
+    known_members = source_members or {}
+    requested_models = tuple(dict.fromkeys(result.requested_models or current_members))
+    failure_reasons = {failure.model: failure.reason for failure in result.failures}
+    rows: list[dict[str, object]] = []
+
+    for model in requested_models:
+        member = current_members.get(model)
+        current_date_available = member is not None
+        if member is None and model not in failure_reasons:
+            # A source present on another selected date still tells us which
+            # fields it can provide, even when this date is outside its range.
+            member = known_members.get(model)
+
+        if member is None:
+            supports = {
+                "proxy": False,
+                "mid_cloud": False,
+                "visibility": False,
+                "precipitation": False,
+                "humidity": False,
+            }
+            status = "UNAVAILABLE"
+            supported = False
+            usable_fields: tuple[str, ...] = ()
+            variables_available: list[str] = []
+            missing_required: list[str] = []
+            missing_optional: list[str] = []
+            error = failure_reasons.get(model)
+        else:
+            capability = member.capability
+            supports = capability.supports
+            status = capability.status
+            supported = capability.supported
+            usable_fields = capability.usable_fields
+            variables_available = sorted(capability.variables_available)
+            missing_required = sorted(capability.missing_required)
+            missing_optional = sorted(capability.missing_optional)
+            error = capability.error
+
+        availability_label = "—"
+        if not current_date_available and model == "jma_msm" and model not in failure_reasons:
+            availability_label = "超出当前预报时效"
+        elif not current_date_available and member is not None:
+            availability_label = "当前日期暂无数据"
+
+        rows.append(
+            {
+                "model": model,
+                "status": status,
+                "status_label": label(MODEL_STATUS_LABELS, status),
+                "supported": supported,
+                "supports": supports,
+                "support_labels": {
+                    name: "✓" if supported else "—" for name, supported in supports.items()
+                },
+                "usable_fields": list(usable_fields),
+                "variables_available": variables_available,
+                "missing_required": missing_required,
+                "missing_optional": missing_optional,
+                "error": error,
+                "availability_label": availability_label,
+            }
+        )
+    return rows
+
+
+def _source_members(
+    daily_results: Iterable[tuple[date, ConsensusResult]],
+) -> dict[str, ForecastMember]:
+    """Keep one successful member per source for date-level capability display."""
+
+    members: dict[str, ForecastMember] = {}
+    for _, result in daily_results:
+        for member in result.members:
+            members.setdefault(member.model, member)
+    return members
 
 
 def trend_payload(metrics: StabilityMetrics, *, variable: str = "proxy") -> dict[str, object]:

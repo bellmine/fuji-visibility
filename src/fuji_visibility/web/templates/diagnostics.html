@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="page-heading">
-  <div><p class="eyebrow">运行状态</p><h1>诊断</h1><p class="lede">查看刷新状态、已保存数据行数和模型能力信息。敏感信息不会在此显示。</p></div>
+  <div><p class="eyebrow">运行状态</p><h1>诊断</h1><p class="lede">查看刷新状态、已保存数据行数和预报来源能力信息。敏感信息不会在此显示。</p></div>
   <a class="button button-secondary" href="/">返回仪表盘</a>
 </div>
 {% if error %}<div class="notice notice-error" role="alert">{{ error }}</div>{% endif %}
@@ -23,26 +23,28 @@
     <div><dt>时区</dt><dd>{{ diagnostics.status.timezone }}（JST）</dd></div>
     <div><dt>最早到达时间</dt><dd>{{ diagnostics.status.arrival_after }}</dd></div>
     <div><dt>时段</dt><dd>{{ diagnostics.status.hours.start }}:00–{{ diagnostics.status.hours.end }}:00</dd></div>
-    <div><dt>已配置模型</dt><dd>{{ diagnostics.configured_models|join('、') }}</dd></div>
+    <div><dt>已配置预报来源</dt><dd>{{ diagnostics.configured_models|join('、') }}</dd></div>
     <div><dt>SQLite 路径</dt><dd class="breakable">{{ diagnostics.database_path }}</dd></div>
     <div><dt>原始数据目录</dt><dd class="breakable">{{ diagnostics.raw_data_dir }}</dd></div>
   </dl>
 </section>
 
 <section class="card panel">
-  <div class="section-heading compact"><div><p class="eyebrow">模型能力</p><h2>最近一次模型数据覆盖</h2></div><span class="muted">能力按运行时实际返回字段判断</span></div>
+  <div class="section-heading compact"><div><p class="eyebrow">预报来源能力</p><h2>最近一次预报来源数据</h2></div><span class="muted">能力按运行时实际返回字段判断</span></div>
   {% if diagnostics.capabilities %}
-    <div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>状态</th><th>综合评分</th><th>中层云</th><th>能见度</th><th>降水</th><th>湿度</th><th>缺失字段 / 异常</th></tr></thead><tbody>
-    {% for item in diagnostics.capabilities %}<tr><th>{{ item.model }}</th><td><span class="label label-{{ item.status|lower|replace('_', '-') }}">{{ {'FULL_PROXY': '完整评分', 'PARTIAL_USEFUL': '部分可用', 'UNAVAILABLE': '不可用'}.get(item.status, item.status) }}</span></td><td>{{ '有' if item.supports.proxy else '—' }}</td><td>{{ '有' if item.supports.mid_cloud else '—' }}</td><td>{{ '有' if item.supports.visibility else '—' }}</td><td>{{ '有' if item.supports.precipitation else '—' }}</td><td>{{ '有' if item.supports.humidity else '—' }}</td><td>{{ item.error or (item.missing_required|join('、') if item.missing_required else '—') }}</td></tr>{% endfor %}
+    <div class="table-wrap"><table class="data-table"><thead><tr><th>预报来源</th><th>综合评分</th><th>中层云</th><th>能见度</th><th>降水</th><th>湿度</th><th>数据说明</th></tr></thead><tbody>
+    {% for item in diagnostics.capabilities %}<tr><th>{{ item.model }}</th><td title="{{ '提供' if item.supports.proxy else '未提供' }}">{{ '✓' if item.supports.proxy else '—' }}</td><td title="{{ '提供' if item.supports.mid_cloud else '未提供' }}">{{ '✓' if item.supports.mid_cloud else '—' }}</td><td title="{{ '提供' if item.supports.visibility else '未提供' }}">{{ '✓' if item.supports.visibility else '—' }}</td><td title="{{ '提供' if item.supports.precipitation else '未提供' }}">{{ '✓' if item.supports.precipitation else '—' }}</td><td title="{{ '提供' if item.supports.humidity else '未提供' }}">{{ '✓' if item.supports.humidity else '—' }}</td><td>{% if item.model == "jma_msm" and item.status == "UNAVAILABLE" and item.error == "暂无已保存的预报数据" %}超出当前预报时效{% else %}—{% endif %}</td></tr>{% endfor %}
     </tbody></table></div>
-  {% else %}<div class="empty-state">暂无模型能力信息。运行一次快照刷新后会填充此表。</div>{% endif %}
+  {% else %}<div class="empty-state">暂无预报来源能力信息。运行一次快照刷新后会填充此表。</div>{% endif %}
 </section>
 
+{% if diagnostics.failures or diagnostics.status.last_refresh_error %}
 <section class="card panel">
-  <div class="section-heading compact"><div><p class="eyebrow">异常</p><h2>最近刷新异常</h2></div></div>
-  {% if diagnostics.failures %}<ul class="failure-list">{% for failure in diagnostics.failures %}<li><strong>{{ failure.model }}</strong> — {{ failure.reason }}</li>{% endfor %}</ul>{% else %}<p class="muted">最近一次刷新没有记录模型异常。</p>{% endif %}
-  {% if diagnostics.status.last_refresh_error %}<p class="error-text">最近一次错误：{{ diagnostics.status.last_refresh_error }}</p>{% endif %}
+  <div class="section-heading compact"><div><p class="eyebrow">运行问题</p><h2>数据获取异常</h2></div></div>
+  {% if diagnostics.failures %}<ul class="failure-list">{% for failure in diagnostics.failures %}<li><strong>{{ failure.model }}</strong> — {{ failure.reason }}</li>{% endfor %}</ul>
+  {% elif diagnostics.status.last_refresh_error %}<p class="error-text">刷新失败：{{ diagnostics.status.last_refresh_error }}</p>{% endif %}
 </section>
+{% endif %}
 {% else %}
 <div class="empty-state">暂时无法获取诊断信息。</div>
 {% endif %}

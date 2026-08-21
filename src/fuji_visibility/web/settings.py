@@ -21,6 +21,7 @@ from ..config import (
     MAX_PROXY_SPREAD_FOR_WEAK_SUPPORT,
     MIN_FULL_PROXY_MODELS,
     MIN_PROXY,
+    FORECAST_COLLECTION_HOURS,
     TIMEZONE,
 )
 from ..time_utils import parse_clock
@@ -135,6 +136,12 @@ class DashboardSettings:
         if not (0 <= self.default_start_hour <= self.default_end_hour <= 23):
             raise ValueError("FUJI_DEFAULT_START_HOUR and END_HOUR must be an inclusive 0-23 range")
         return self.default_start_hour, self.default_end_hour
+
+    @property
+    def collection_hours(self) -> tuple[int, int]:
+        """The fixed local-day range used by forecast collection/storage."""
+
+        return FORECAST_COLLECTION_HOURS
 
     @property
     def location_preset(self):

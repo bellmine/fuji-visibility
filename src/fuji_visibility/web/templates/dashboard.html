@@ -11,7 +11,7 @@
   <div>
     <p class="eyebrow">富士五湖 · {{ location_label }}</p>
     <h1>什么时候最容易看到富士山？</h1>
-    <p class="lede">基于多模型预报数据进行判断，仅供出行决策参考，不代表一定能看到富士山。</p>
+    <p class="lede">汇总多个天气预报来源，展示富士山逐小时观景条件，仅供出行参考。</p>
   </div>
   <div class="freshness-block status-{{ status.freshness|lower }}">
     <span class="status-dot" aria-hidden="true"></span>
@@ -26,11 +26,12 @@
   <div class="notice notice-error" role="alert">{{ error }}</div>
 {% endif %}
 
-{% if status.freshness in ["STALE", "WARNING", "UNKNOWN"] or status.last_refresh_status == "partial" or (status.snapshot_count > 0 and status.full_models < status.configured_models) %}
+{% set source_fetch_failed = status.last_refresh_status in ["partial", "failed"] %}
+{% set too_few_scoring_sources = status.snapshot_count > 0 and status.full_models < settings.min_full_proxy_models %}
+{% if status.freshness in ["STALE", "WARNING", "UNKNOWN"] or source_fetch_failed or too_few_scoring_sources %}
   <div class="notice notice-warning">
-    <strong>数据状态：</strong>
-    {% if status.freshness == "STALE" %}预报数据已过期，建议刷新后再做出行判断。{% elif status.freshness == "WARNING" %}预报数据正在变旧，建议刷新后再做出行判断。{% elif status.freshness == "UNKNOWN" %}暂无成功快照时间，建议先刷新预报。{% endif %}
-    {% if status.last_refresh_status == "partial" or (status.snapshot_count > 0 and status.full_models < status.configured_models) %}目前只有 {{ status.full_models }} 个模型具备完整评分所需数据。{% endif %}
+    <strong>{% if source_fetch_failed %}数据获取异常：{% else %}数据状态：{% endif %}</strong>
+    {% if status.last_refresh_status == "partial" %}部分预报来源获取失败，本次结果可能不完整。{% elif status.last_refresh_status == "failed" %}预报刷新失败，当前结果可能来自已保存的旧数据。{% elif too_few_scoring_sources %}目前只有 {{ status.full_models }} 个预报来源支持综合评分，本次结果可能不完整。{% elif status.freshness == "STALE" %}预报数据已过期，建议刷新后再做出行判断。{% elif status.freshness == "WARNING" %}预报数据正在变旧，建议刷新后再做出行判断。{% elif status.freshness == "UNKNOWN" %}暂无成功快照时间，建议先刷新预报。{% endif %}
   </div>
 {% endif %}
 
@@ -44,9 +45,20 @@
         <option value="shojiko"{% if location.name == "shojiko" %} selected{% endif %}>精进湖</option>
       </select>
     </label>
+    {% set current_hours = filter_hours[0] ~ '-' ~ filter_hours[1] %}
     <label>
-      <span>时段</span>
-      <input name="hours" inputmode="numeric" value="{{ filter_hours[0] }}-{{ filter_hours[1] }}" aria-label="时段范围，例如 5-12">
+      <span>常用时段</span>
+      <select data-hours-preset aria-label="选择常用时段">
+        <option value="">选择常用范围</option>
+        <option value="5-12"{% if current_hours == "5-12" %} selected{% endif %}>早间 · 05:00–12:00</option>
+        <option value="8-17"{% if current_hours == "8-17" %} selected{% endif %}>白天 · 08:00–17:00</option>
+        <option value="13-18"{% if current_hours == "13-18" %} selected{% endif %}>下午 · 13:00–18:00</option>
+        <option value="0-23"{% if current_hours == "0-23" %} selected{% endif %}>全天 · 00:00–23:00</option>
+      </select>
+    </label>
+    <label>
+      <span>时段（可自定义）</span>
+      <input name="hours" inputmode="numeric" value="{{ current_hours }}" aria-label="时段范围，例如 5-12">
     </label>
     <label>
       <span>最早到达时间</span>
@@ -81,7 +93,7 @@
   {% elif overall and overall.day_rank_score is not none %}
     <p class="decision-summary"><strong>{{ overall.date_label }}</strong> 当前最高可用评分为 <strong>{{ overall.day_rank_score|number(0) }}</strong>，但没有足够的连续时段组成 {{ settings.best_block_hours }} 小时区块。</p>
   {% else %}
-    <p class="decision-summary">目前暂无可用于排名的综合评分。逐小时数据和模型诊断仍会保留在下方。</p>
+    <p class="decision-summary">目前暂无可用于排名的综合评分。逐小时数据和预报来源诊断仍会保留在下方。</p>
   {% endif %}
 </section>
 
@@ -166,7 +178,7 @@
               {% if not hour.is_best_block and not hour.warnings.labels %}<span class="muted">—</span>{% endif %}
             </td>
           </tr>
-          <tr class="hour-detail-row"><td colspan="7"><details><summary>查看 {{ hour.local_time }} 的模型详情</summary><div class="hour-detail-grid"><div><strong>综合评分</strong><span>{{ hour.proxy_median|number(0) }} 分 · {{ hour.proxy.agreement_label }}</span><span>{{ hour.full_proxy_model_count }} 个完整评分来源</span></div><div><strong>能见度</strong><span>{{ hour.visibility_median_km|kilometers(1) }} · {{ hour.visibility_model_count }} 个模型</span><span>{{ hour.field_consensus.visibility.support_label if hour.field_consensus.visibility else '数据不足' }}</span></div><div><strong>字段共识</strong><span>{{ hour.field_consensus.mid_cloud.support_label if hour.field_consensus.mid_cloud else '数据不足' }}</span><span>{{ hour.field_consensus.precipitation.support_label if hour.field_consensus.precipitation else '数据不足' }}</span></div><div><strong>规则状态</strong><span>{{ hour.status_label }} · 置信度：{{ hour.confidence_label }}</span><span>{{ hour.decision_reasons_label|join('、') if hour.decision_reasons_label else '暂无更多判断说明' }}</span></div></div></details></td></tr>
+          <tr class="hour-detail-row"><td colspan="7"><details><summary>查看 {{ hour.local_time }} 的预报来源详情</summary><div class="hour-detail-grid"><div><strong>综合评分</strong><span>{{ hour.proxy_median|number(0) }} 分 · {{ hour.proxy.agreement_label }}</span><span>{{ hour.full_proxy_model_count }} 个预报来源参与综合评分</span></div><div><strong>能见度</strong><span>{{ hour.visibility_median_km|kilometers(1) }} · {{ hour.visibility_model_count }} 个预报来源</span><span>{{ hour.field_consensus.visibility.support_label if hour.field_consensus.visibility else '数据不足' }}</span></div><div><strong>字段共识</strong><span>{{ hour.field_consensus.mid_cloud.support_label if hour.field_consensus.mid_cloud else '数据不足' }}</span><span>{{ hour.field_consensus.precipitation.support_label if hour.field_consensus.precipitation else '数据不足' }}</span></div><div><strong>规则状态</strong><span>{{ hour.status_label }} · 置信度：{{ hour.confidence_label }}</span><span>{{ hour.decision_reasons_label|join('、') if hour.decision_reasons_label else '暂无更多判断说明' }}</span></div></div></details></td></tr>
         {% endfor %}
         </tbody>
       </table>
@@ -178,7 +190,7 @@
           <div class="hour-card-trend"><span>{{ hour.trend_label }}</span><span class="subvalue">{{ hour.reachability_label }}</span></div>
           <dl class="compact-metrics two-columns"><div><dt>中层云量</dt><dd>{{ hour.mid_cloud_median|number(0) }}%</dd></div><div><dt>能见度</dt><dd>{{ hour.visibility_median_km|kilometers(1) }}</dd></div><div><dt>降水概率</dt><dd>{{ hour.precip_median|number(0) }}%</dd></div><div><dt>提示</dt><dd>{% if hour.is_best_block %}最佳时段{% elif hour.top_rank_label %}{{ hour.top_rank_label }}{% else %}{{ hour.condition_label }}{% endif %}</dd></div></dl>
           {% if hour.warnings.labels %}<div class="warning-list">{% for warning in hour.warnings.labels %}<span class="warning-chip">⚠ {{ warning }}</span>{% endfor %}</div>{% endif %}
-          <details><summary>查看模型详情</summary><p class="muted">{{ hour.status_label }} · {{ hour.confidence_label }} · {{ hour.proxy.agreement_label }}</p><p class="muted">{{ hour.decision_reasons_label|join('、') if hour.decision_reasons_label else '暂无更多判断说明' }}</p></details>
+          <details><summary>查看预报来源详情</summary><p class="muted">{{ hour.status_label }} · {{ hour.confidence_label }} · {{ hour.proxy.agreement_label }}</p><p class="muted">{{ hour.decision_reasons_label|join('、') if hour.decision_reasons_label else '暂无更多判断说明' }}</p></details>
         </article>
       {% endfor %}
     </div>
@@ -189,18 +201,18 @@
 
 <details class="card rule-details">
   <summary><span><p class="eyebrow">辅助判断</p><h2>规则判断详情</h2></span><span class="muted">{{ decision.status_label }}</span></summary>
-  <p class="muted">这些状态用于解释多模型证据，不会隐藏或取消逐小时排名。</p>
+  <p class="muted">这些状态用于解释多个预报来源的证据，不会隐藏或取消逐小时排名。</p>
   {% if decision.status == "INSUFFICIENT EVIDENCE" %}<p>目前核心数据不足，暂时无法做出可靠判断。</p>{% endif %}
   <ul class="rationale">{% for item in decision.rationale_label %}<li>{{ item }}</li>{% endfor %}</ul>
 </details>
 
 <div class="two-panel-grid">
   <section class="card panel" aria-labelledby="consensus-heading">
-    <div class="section-heading compact"><div><p class="eyebrow">模型一致性</p><h2 id="consensus-heading">模型共识</h2></div></div>
+    <div class="section-heading compact"><div><p class="eyebrow">预报来源一致性</p><h2 id="consensus-heading">预报来源共识</h2></div></div>
     {% if selected_day and selected_day.hours %}
       {% set focus_hour = selected_day.top_hours[0] if selected_day.top_hours else selected_day.hours[0] %}
       <div class="focus-summary"><span class="focus-time">{{ focus_hour.local_time }}</span><span class="label label-{{ focus_hour.status|lower|replace('_', '-') }}">{{ focus_hour.status_label }}</span><strong>{{ focus_hour.proxy_median|number(0) }} 分</strong></div>
-      <p class="muted">{{ focus_hour.full_proxy_model_count }} 个完整评分来源，{{ focus_hour.proxy.agreement_label }}。离群模型：{{ focus_hour.outlier_models|join('、') if focus_hour.outlier_models else '无' }}。</p>
+      <p class="muted">{{ focus_hour.full_proxy_model_count }} 个预报来源参与综合评分，{{ focus_hour.proxy.agreement_label }}。偏离来源：{{ focus_hour.outlier_models|join('、') if focus_hour.outlier_models else '无' }}。</p>
       <div class="field-summary-grid">
         <div><span>中层云</span><strong>{{ focus_hour.field_consensus.mid_cloud.support_label if focus_hour.field_consensus.mid_cloud else '数据不足' }}</strong></div>
         <div><span>降水</span><strong>{{ focus_hour.field_consensus.precipitation.support_label if focus_hour.field_consensus.precipitation else '数据不足' }}</strong></div>
@@ -210,7 +222,7 @@
       <div class="vote-list">
         {% for model in focus_hour.models %}<div class="vote-row"><span>{{ model.model }}</span><span class="vote-score">{{ model.proxy|number(0) }}</span><span class="label label-{{ model.capability_status|lower|replace('_', '-') }}">{{ model.capability_status_label }}</span></div>{% endfor %}
       </div>
-    {% else %}<div class="empty-state">暂无可显示的模型共识数据。</div>{% endif %}
+    {% else %}<div class="empty-state">暂无可显示的预报来源共识数据。</div>{% endif %}
   </section>
 
   <section class="card panel" aria-labelledby="trend-heading">
@@ -227,13 +239,14 @@
 
 <section class="card panel diagnostics-panel" aria-labelledby="model-diagnostics-heading">
   <details open>
-    <summary><span><p class="eyebrow">诊断</p><h2 id="model-diagnostics-heading">模型数据覆盖与异常</h2></span><span class="muted">选定日期 {{ selected_day.models|length if selected_day else 0 }} 个模型</span></summary>
+    <summary><span><p class="eyebrow">诊断</p><h2 id="model-diagnostics-heading">预报来源与可用数据</h2></span><span class="muted">当前使用 {{ status.configured_models }} 个预报来源</span></summary>
     {% if selected_day and selected_day.models %}
-      <div class="table-wrap"><table class="data-table"><thead><tr><th>模型</th><th>状态</th><th>综合评分</th><th>中层云</th><th>能见度</th><th>降水</th><th>湿度</th><th>异常</th></tr></thead><tbody>
-      {% for model in selected_day.models %}<tr><th>{{ model.model }}</th><td><span class="label label-{{ model.status|lower|replace('_', '-') }}">{{ model.status_label }}</span></td><td>{{ '有' if model.supports.proxy else '—' }}</td><td>{{ '有' if model.supports.mid_cloud else '—' }}</td><td>{{ '有' if model.supports.visibility else '—' }}</td><td>{{ '有' if model.supports.precipitation else '—' }}</td><td>{{ '有' if model.supports.humidity else '—' }}</td><td>{{ model.error or (model.missing_required|join('、') if model.missing_required else '—') }}</td></tr>{% endfor %}
+      <div class="table-wrap"><table class="data-table"><thead><tr><th>预报来源</th><th>综合评分</th><th>中层云</th><th>能见度</th><th>降水</th><th>湿度</th><th>数据说明</th></tr></thead><tbody>
+      {% for model in selected_day.models %}<tr><th>{{ model.model }}</th><td title="{{ '提供' if model.supports.proxy else '未提供' }}">{{ '✓' if model.supports.proxy else '—' }}</td><td title="{{ '提供' if model.supports.mid_cloud else '未提供' }}">{{ '✓' if model.supports.mid_cloud else '—' }}</td><td title="{{ '提供' if model.supports.visibility else '未提供' }}">{{ '✓' if model.supports.visibility else '—' }}</td><td title="{{ '提供' if model.supports.precipitation else '未提供' }}">{{ '✓' if model.supports.precipitation else '—' }}</td><td title="{{ '提供' if model.supports.humidity else '未提供' }}">{{ '✓' if model.supports.humidity else '—' }}</td><td>{{ model.availability_label }}</td></tr>{% endfor %}
       </tbody></table></div>
+    {% else %}<div class="empty-state">暂无预报来源可用数据。</div>
     {% endif %}
-    {% if selected_day and selected_day.failures %}<h3>刷新异常</h3><ul class="failure-list">{% for failure in selected_day.failures %}<li><strong>{{ failure.model }}</strong> — {{ failure.reason }}</li>{% endfor %}</ul>{% endif %}
+    {% if selected_day and selected_day.failures %}<div class="source-errors"><h3>数据获取异常</h3><ul class="failure-list">{% for failure in selected_day.failures %}<li><strong>{{ failure.model }}</strong> — {{ failure.reason }}</li>{% endfor %}</ul></div>{% endif %}
   </details>
 </section>
 

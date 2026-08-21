@@ -29,7 +29,14 @@ from .models import ModelCapability, StoredForecast
 from .open_meteo import OpenMeteoClient, OpenMeteoError
 from .storage import ForecastStore, StorageError
 from .stability import StabilityMetrics, consensus_stability
-from .time_utils import JST, canonical_iso, parse_clock, parse_datetime, to_jst
+from .time_utils import (
+    JST,
+    canonical_iso,
+    full_local_date_range,
+    parse_clock,
+    parse_datetime,
+    to_jst,
+)
 from .web.refresh import refresh_lock
 from .web.settings import DashboardSettings
 
@@ -139,13 +146,17 @@ def snapshot_all_models(
 ) -> SnapshotRun:
     """Fetch and persist each model independently without holding a DB write open."""
 
+    collection_start, collection_end = full_local_date_range(days)
     with OpenMeteoClient(verbose=verbose, timeout=timeout) as client:
         fetcher = ConsensusFetcher(client)
         result = fetcher.fetch(
             latitude,
             longitude,
             models=models,
-            model_kwargs={"forecast_days": days},
+            # Date-bounded requests are the collection contract: with the
+            # client's JST timezone they include every local hour (00–23) for
+            # each day. UI hours and arrival cutoffs never enter this path.
+            model_kwargs={"start_date": collection_start, "end_date": collection_end},
         )
     if not result.members:
         detail = "; ".join(f"{failure.model}: {failure.reason}" for failure in result.failures)
@@ -654,6 +665,10 @@ class DashboardService:
             "hours": {
                 "start": self.settings.hours[0],
                 "end": self.settings.hours[1],
+            },
+            "collection_hours": {
+                "start": self.settings.collection_hours[0],
+                "end": self.settings.collection_hours[1],
             },
             "configured_models": len(self.settings.configured_models),
             "full_models": full_models,

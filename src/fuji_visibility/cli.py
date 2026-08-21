@@ -43,7 +43,15 @@ from .open_meteo import OpenMeteoClient, OpenMeteoError
 from .services import fetch_consensus_days as fetch_service_consensus_days
 from .storage import ForecastStore, StorageError
 from .stability import consensus_stability, model_stability
-from .time_utils import JST, canonical_iso, iter_run_times, parse_clock, parse_date, parse_datetime
+from .time_utils import (
+    JST,
+    canonical_iso,
+    full_local_date_range,
+    iter_run_times,
+    parse_clock,
+    parse_date,
+    parse_datetime,
+)
 
 app = typer.Typer(
     name="fuji",
@@ -399,13 +407,16 @@ def snapshot(
 
     latitude, longitude, location_name = _resolve_location_or_exit(location, lat, lon)
     try:
+        collection_start, collection_end = full_local_date_range(days)
         with OpenMeteoClient(verbose=_verbose(), timeout=REQUEST_TIMEOUT_SECONDS) as client:
             fetcher = ConsensusFetcher(client)
             consensus_result = fetcher.fetch(
                 latitude,
                 longitude,
                 models=_resolve_models(models, model),
-                model_kwargs={"forecast_days": days},
+                # Snapshot storage is always a complete local-day data set;
+                # --hours is a presentation option on other commands only.
+                model_kwargs={"start_date": collection_start, "end_date": collection_end},
             )
         if not consensus_result.members:
             detail = "; ".join(
